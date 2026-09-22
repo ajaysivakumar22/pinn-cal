@@ -6,3 +6,4 @@ models/
 pip_tmp/
 *.png
 .ipynb_checkpoints/
+.venv/
