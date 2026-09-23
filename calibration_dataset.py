@@ -44,6 +44,10 @@ class DatasetConfig:
     phase_sigma_deg: float = 20.0
     gain_sigma_db: float = 2.0
 
+    # Measurement SNR in dB.
+    # None disables measurement noise.
+    snr_db: float | None = 20.0
+
     min_angle_deg: float = -60.0
     max_angle_deg: float = 60.0
 
@@ -70,6 +74,7 @@ def generate_sample(
         Target vector of shape (128,):
             [Re(C), Im(C)]
     """
+
     if coupling_matrix is None:
         coupling_matrix = mutual_impedance_matrix(config)
 
@@ -77,13 +82,17 @@ def generate_sample(
 
     z_self = coupling_matrix.diagonal().mean()
 
+    # ------------------------------------------------------------------
     # Ideal desired excitation for the requested beam direction.
+    # ------------------------------------------------------------------
     v_ideal = steering_vector(
         angle_deg,
         config,
     ).to(torch.complex128)
 
+    # ------------------------------------------------------------------
     # Hardware impairment.
+    # ------------------------------------------------------------------
     phase_error_deg, gain_error_db = generate_hardware_errors(
         config.num_elements,
         phase_sigma_deg=dataset_config.phase_sigma_deg,
@@ -98,18 +107,69 @@ def generate_sample(
         gain_error_db,
     ).to(torch.complex128)
 
+    # ------------------------------------------------------------------
     # Physical observation after mutual coupling.
+    # ------------------------------------------------------------------
     i_observed = torch.linalg.solve(
         coupling_matrix,
         v_hardware * z_self,
     )
 
+    # ------------------------------------------------------------------
+    # Optional complex AWGN measurement noise.
+    #
+    # The target remains the true hardware correction.
+    # Only the observed input is corrupted.
+    # ------------------------------------------------------------------
+    if dataset_config.snr_db is not None:
+        signal_power = torch.mean(
+            torch.abs(i_observed) ** 2
+        )
+
+        noise_power = (
+            signal_power
+            / (10.0 ** (dataset_config.snr_db / 10.0))
+        )
+
+        noise_std = torch.sqrt(
+            noise_power / 2.0
+        )
+
+        noise_generator = torch.Generator(
+            device=i_observed.device
+        )
+
+        noise_generator.manual_seed(
+            seed + 1_000_000
+        )
+
+        noise = torch.complex(
+            torch.randn(
+                i_observed.shape,
+                generator=noise_generator,
+                dtype=torch.float64,
+                device=i_observed.device,
+            ),
+            torch.randn(
+                i_observed.shape,
+                generator=noise_generator,
+                dtype=torch.float64,
+                device=i_observed.device,
+            ),
+        ) * noise_std
+
+        i_observed = i_observed + noise
+
+    # ------------------------------------------------------------------
     # Exact hardware correction.
+    # ------------------------------------------------------------------
     correction = v_ideal / v_hardware
 
+    # ------------------------------------------------------------------
     # Model input:
     #   64 real + 64 imaginary coupled-current values
     #   + target angle encoded as sin/cos
+    # ------------------------------------------------------------------
     x = torch.cat(
         [
             i_observed.real,
@@ -124,8 +184,10 @@ def generate_sample(
         ]
     )
 
+    # ------------------------------------------------------------------
     # Training target:
     #   64 real + 64 imaginary correction coefficients
+    # ------------------------------------------------------------------
     y = torch.cat(
         [
             correction.real,
@@ -146,17 +208,27 @@ def generate_dataset(
     """
     Generate a complete calibration dataset.
     """
+
     rng = np.random.default_rng(config.seed)
 
-    coupling_matrix = mutual_impedance_matrix(array_config).cpu()
+    # One fixed physical coupling matrix is shared by the dataset.
+    coupling_matrix = mutual_impedance_matrix(
+        array_config
+    ).cpu()
 
     X = np.zeros(
-        (config.num_samples, 2 * array_config.num_elements + 2),
+        (
+            config.num_samples,
+            2 * array_config.num_elements + 2,
+        ),
         dtype=np.float32,
     )
 
     Y = np.zeros(
-        (config.num_samples, 2 * array_config.num_elements),
+        (
+            config.num_samples,
+            2 * array_config.num_elements,
+        ),
         dtype=np.float32,
     )
 
