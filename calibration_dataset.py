@@ -3,19 +3,23 @@ PINN-Cal — Physically Grounded Calibration Dataset
 
 Generates training samples from the differentiable physics core.
 
-Input:
-    - Real + imaginary parts of the coupled complex array current
-    - sin(target_angle)
-    - cos(target_angle)
+Physical generation chain:
 
-Target:
-    - Real + imaginary parts of the exact inverse hardware correction
+    Ideal excitation
+        ↓
+    Hardware gain/phase errors
+        ↓
+    TRUE mutual-coupling network
+        ↓
+    Coupled current
+        ↓
+    Measurement noise
+        ↓
+    Observed current
 
-The target correction is:
-    C = V_ideal / V_hardware
+The PINN receives only the noisy observation and target steering angle.
 
-The physical engine is then used by the PINN to verify whether the
-predicted correction restores the desired coupled array state.
+The true coupling matrix is hidden from the model.
 """
 
 from __future__ import annotations
@@ -34,6 +38,10 @@ from physics_core import (
     steering_vector,
 )
 
+from coupling_model import (
+    generate_true_coupling_matrix,
+)
+
 
 @dataclass(frozen=True)
 class DatasetConfig:
@@ -41,16 +49,22 @@ class DatasetConfig:
 
     num_samples: int = 1000
 
+    # Hardware impairments
     phase_sigma_deg: float = 20.0
     gain_sigma_db: float = 2.0
 
-    # Measurement SNR in dB.
-    # None disables measurement noise.
+    # Measurement noise
     snr_db: float | None = 20.0
 
+    # Coupling uncertainty
+    # ±20% parameter mismatch around nominal coupling.
+    coupling_mismatch_fraction: float = 0.20
+
+    # Steering range
     min_angle_deg: float = -60.0
     max_angle_deg: float = 60.0
 
+    # Reproducibility
     seed: int = 42
 
 
@@ -59,40 +73,63 @@ def generate_sample(
     seed: int,
     config: ArrayConfig = DEFAULT_CONFIG,
     dataset_config: DatasetConfig = DatasetConfig(),
-    coupling_matrix: torch.Tensor | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Generate one physically grounded calibration sample.
 
-    Returns
-    -------
-    x : np.ndarray
-        Input vector of shape (130,):
-            [Re(I_obs), Im(I_obs), sin(theta), cos(theta)]
+    Input:
+        130 values:
+            64 real observed-current values
+            64 imaginary observed-current values
+            sin(theta)
+            cos(theta)
 
-    y : np.ndarray
-        Target vector of shape (128,):
-            [Re(C), Im(C)]
+    Target:
+        128 values:
+            64 real correction values
+            64 imaginary correction values
     """
 
-    if coupling_matrix is None:
-        coupling_matrix = mutual_impedance_matrix(config)
+    # ---------------------------------------------------------------
+    # Nominal coupling model.
+    #
+    # This represents the model available to PINN-Cal.
+    # ---------------------------------------------------------------
+    nominal_coupling = mutual_impedance_matrix(
+        config
+    ).to(torch.complex128).cpu()
 
-    coupling_matrix = coupling_matrix.to(torch.complex128)
+    # ---------------------------------------------------------------
+    # TRUE coupling matrix.
+    #
+    # This is deliberately different from the nominal matrix and is
+    # hidden from the model.
+    #
+    # Use a separate deterministic seed so hardware errors and
+    # coupling uncertainty are statistically independent.
+    # ---------------------------------------------------------------
+    true_coupling = generate_true_coupling_matrix(
+        config=config,
+        mismatch_fraction=(
+            dataset_config.coupling_mismatch_fraction
+        ),
+        seed=seed + 2_000_000,
+        nominal_matrix=nominal_coupling,
+    ).to(torch.complex128)
 
-    z_self = coupling_matrix.diagonal().mean()
+    z_self_true = true_coupling.diagonal().mean()
 
-    # ------------------------------------------------------------------
-    # Ideal desired excitation for the requested beam direction.
-    # ------------------------------------------------------------------
+    # ---------------------------------------------------------------
+    # Ideal excitation.
+    # ---------------------------------------------------------------
     v_ideal = steering_vector(
         angle_deg,
         config,
     ).to(torch.complex128)
 
-    # ------------------------------------------------------------------
+    # ---------------------------------------------------------------
     # Hardware impairment.
-    # ------------------------------------------------------------------
+    # ---------------------------------------------------------------
     phase_error_deg, gain_error_db = generate_hardware_errors(
         config.num_elements,
         phase_sigma_deg=dataset_config.phase_sigma_deg,
@@ -107,28 +144,35 @@ def generate_sample(
         gain_error_db,
     ).to(torch.complex128)
 
-    # ------------------------------------------------------------------
-    # Physical observation after mutual coupling.
-    # ------------------------------------------------------------------
-    i_observed = torch.linalg.solve(
-        coupling_matrix,
-        v_hardware * z_self,
+    # ---------------------------------------------------------------
+    # TRUE physical array state.
+    #
+    # Z_true I_true = V_hardware * Z_self,true
+    # ---------------------------------------------------------------
+    i_true = torch.linalg.solve(
+        true_coupling,
+        v_hardware * z_self_true,
     )
 
-    # ------------------------------------------------------------------
-    # Optional complex AWGN measurement noise.
-    #
-    # The target remains the true hardware correction.
-    # Only the observed input is corrupted.
-    # ------------------------------------------------------------------
+    i_observed = i_true
+
+    # ---------------------------------------------------------------
+    # Measurement noise.
+    # ---------------------------------------------------------------
     if dataset_config.snr_db is not None:
         signal_power = torch.mean(
-            torch.abs(i_observed) ** 2
+            torch.abs(i_true) ** 2
         )
 
         noise_power = (
             signal_power
-            / (10.0 ** (dataset_config.snr_db / 10.0))
+            / (
+                10.0
+                ** (
+                    dataset_config.snr_db
+                    / 10.0
+                )
+            )
         )
 
         noise_std = torch.sqrt(
@@ -136,7 +180,7 @@ def generate_sample(
         )
 
         noise_generator = torch.Generator(
-            device=i_observed.device
+            device=i_true.device
         )
 
         noise_generator.manual_seed(
@@ -145,49 +189,66 @@ def generate_sample(
 
         noise = torch.complex(
             torch.randn(
-                i_observed.shape,
+                i_true.shape,
                 generator=noise_generator,
                 dtype=torch.float64,
-                device=i_observed.device,
+                device=i_true.device,
             ),
             torch.randn(
-                i_observed.shape,
+                i_true.shape,
                 generator=noise_generator,
                 dtype=torch.float64,
-                device=i_observed.device,
+                device=i_true.device,
             ),
         ) * noise_std
 
-        i_observed = i_observed + noise
+        i_observed = i_true + noise
 
-    # ------------------------------------------------------------------
+    # ---------------------------------------------------------------
     # Exact hardware correction.
-    # ------------------------------------------------------------------
-    correction = v_ideal / v_hardware
+    #
+    # Important:
+    # The target depends only on the hardware impairment.
+    #
+    # The coupling matrix and measurement noise affect the
+    # observation, not the ground-truth hardware correction.
+    # ---------------------------------------------------------------
+    correction = (
+        v_ideal / v_hardware
+    )
 
-    # ------------------------------------------------------------------
+    # ---------------------------------------------------------------
     # Model input:
-    #   64 real + 64 imaginary coupled-current values
-    #   + target angle encoded as sin/cos
-    # ------------------------------------------------------------------
+    #
+    #   64 real observed-current values
+    #   64 imaginary observed-current values
+    #   sin(theta)
+    #   cos(theta)
+    # ---------------------------------------------------------------
     x = torch.cat(
         [
             i_observed.real,
             i_observed.imag,
             torch.tensor(
                 [
-                    np.sin(np.deg2rad(angle_deg)),
-                    np.cos(np.deg2rad(angle_deg)),
+                    np.sin(
+                        np.deg2rad(angle_deg)
+                    ),
+                    np.cos(
+                        np.deg2rad(angle_deg)
+                    ),
                 ],
                 dtype=torch.float64,
             ),
         ]
     )
 
-    # ------------------------------------------------------------------
-    # Training target:
-    #   64 real + 64 imaginary correction coefficients
-    # ------------------------------------------------------------------
+    # ---------------------------------------------------------------
+    # Model target:
+    #
+    #   64 real correction values
+    #   64 imaginary correction values
+    # ---------------------------------------------------------------
     y = torch.cat(
         [
             correction.real,
@@ -206,15 +267,12 @@ def generate_dataset(
     array_config: ArrayConfig = DEFAULT_CONFIG,
 ) -> dict[str, np.ndarray]:
     """
-    Generate a complete calibration dataset.
+    Generate a complete reproducible calibration dataset.
     """
 
-    rng = np.random.default_rng(config.seed)
-
-    # One fixed physical coupling matrix is shared by the dataset.
-    coupling_matrix = mutual_impedance_matrix(
-        array_config
-    ).cpu()
+    rng = np.random.default_rng(
+        config.seed
+    )
 
     X = np.zeros(
         (
@@ -237,7 +295,9 @@ def generate_dataset(
         dtype=np.float32,
     )
 
-    for idx in range(config.num_samples):
+    for idx in range(
+        config.num_samples
+    ):
         angle = float(
             rng.uniform(
                 config.min_angle_deg,
@@ -250,7 +310,6 @@ def generate_dataset(
             seed=config.seed + idx,
             config=array_config,
             dataset_config=config,
-            coupling_matrix=coupling_matrix,
         )
 
         X[idx] = x
