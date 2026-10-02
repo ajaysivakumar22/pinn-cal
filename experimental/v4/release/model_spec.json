@@ -1,0 +1,119 @@
+{
+  "model_name": "PINN-Cal V4 Reference Model",
+  "version": "4.0.0-frozen",
+  "status": "FROZEN_RELEASE",
+  "date_frozen": "2026-10-02",
+  "architecture": {
+    "class_name": "PINNCalV4",
+    "physics_preconditioner": {
+      "class_name": "FixedPhysicsPreconditioner",
+      "regularization": "scalar_complex_tikhonov",
+      "delta": 0.15,
+      "max_preconditioner_gain": 3.3333333333333335,
+      "trainable_parameters": 0
+    },
+    "residual_denoiser": {
+      "class_name": "BoundedResidualDenoiser",
+      "in_features": 128,
+      "hidden_dims": [128, 64],
+      "out_features": 128,
+      "activation": "ReLU",
+      "bounding_function": "alpha * tanh(r)",
+      "alpha": 0.50,
+      "alpha_mode": "fixed",
+      "trainable_parameters": 33088
+    },
+    "total_trainable_parameters": 33088,
+    "input_dimension": 130,
+    "output_dimension": 64
+  },
+  "training": {
+    "reference_seed": 42,
+    "dataset": "experimental/v4/datasets/v4_train_2000.npy",
+    "dataset_provenance": "Multi-SNR uniform [5.0, 30.0] dB, phase_sigma=20.0 deg, gain_sigma=2.0 dB, coupling_mismatch=20%",
+    "optimizer": "AdamW",
+    "learning_rate": 0.001,
+    "weight_decay": 0.0001,
+    "batch_size": 32,
+    "epochs": 100,
+    "best_validation_epoch": 29,
+    "best_validation_loss": 0.134375
+  },
+  "artifacts": {
+    "reference_checkpoint_path": "experimental/v4/models/pinn_v4_tikhonov015_seed42.pth",
+    "reference_checkpoint_sha256": "f5da358645e24536ce4f3c6144bc28f47f9a13bfc6c6744169f6ee055f2f9efe",
+    "frozen_v3_comparison_checkpoint": "models/pinn_cal_final_best.pth",
+    "frozen_v3_sha256": "5edc7d62cd7db7a655c580a42b4d70b649a0868cac62e503abd7d744d7936eb8",
+    "blind_holdout_path": "experimental/v4/results/blind_final_holdout_500.npy",
+    "blind_holdout_sha256": "edb5b02ba8825da5633db844b0186b030cc2d39b66a4751bf9c52108d3781c48",
+    "blind_holdout_status": "FINAL — DO NOT USE FOR MODEL SELECTION"
+  },
+  "headline_metrics_blind_holdout": {
+    "sample_count_per_condition": 500,
+    "total_holdout_samples": 5000,
+    "nominal_20db": {
+      "nmse_db": -14.81,
+      "phase_error_deg": 4.47,
+      "gain_error_db": 1.00,
+      "relative_error_pct": 15.34,
+      "pointing_error_deg": 0.0253,
+      "beam_correlation": 0.99979
+    },
+    "snr_10db": {
+      "nmse_db": -6.88,
+      "phase_error_deg": 11.92,
+      "gain_error_db": 1.76,
+      "pointing_error_deg": 0.0475,
+      "beam_correlation": 0.99766
+    },
+    "snr_5db": {
+      "nmse_db": -2.30,
+      "phase_error_deg": 21.95,
+      "gain_error_db": 2.57,
+      "pointing_error_deg": 0.0765,
+      "beam_correlation": 0.98133
+    },
+    "phase_stress_35deg": {
+      "nmse_db": -13.96,
+      "phase_error_deg": 5.76,
+      "gain_error_db": 1.06,
+      "pointing_error_deg": 0.0285,
+      "beam_correlation": 0.99967
+    },
+    "gain_stress_4db": {
+      "nmse_db": -11.77,
+      "phase_error_deg": 6.14,
+      "gain_error_db": 1.20,
+      "pointing_error_deg": 0.0297,
+      "beam_correlation": 0.99960
+    },
+    "coupling_stress_40pct": {
+      "nmse_db": -11.02,
+      "phase_error_deg": 5.42,
+      "gain_error_db": 1.77,
+      "pointing_error_deg": 0.0284,
+      "beam_correlation": 0.99944
+    },
+    "steering_stress_65deg": {
+      "nmse_db": -14.82,
+      "phase_error_deg": 4.48,
+      "gain_error_db": 1.01,
+      "pointing_error_deg": 0.0284,
+      "beam_correlation": 0.99979
+    },
+    "combined_severe": {
+      "nmse_db": -2.35,
+      "phase_error_deg": 20.49,
+      "gain_error_db": 2.78,
+      "pointing_error_deg": 0.0928,
+      "beam_correlation": 0.98992
+    }
+  },
+  "environment": {
+    "python_version": "3.11.15",
+    "torch_version": "2.5.1+cu121",
+    "cuda_available": true,
+    "gpu_device": "NVIDIA GeForce GTX 1650"
+  },
+  "test_status": "23/23 PASSED (100%)"
+}

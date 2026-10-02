@@ -1,9 +1,48 @@
+# Python environments & caches
 venv/
+.venv/
 __pycache__/
 *.pyc
-data/
-models/
-pip_tmp/
-*.png
+*.pyo
+.pytest_cache/
 .ipynb_checkpoints/
-.venv/
+pip_tmp/
+
+# Logs & Environment variables
+*.log
+.env
+.env.*
+*.local
+
+# Editor & OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Root benchmark & model caches
+/data/
+/models/
+/*.png
+
+# Frontend build outputs
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Experimental V4: Ignore exploratory models/histories by default, include frozen release checkpoints
+experimental/v4/models/*
+!experimental/v4/models/pinn_v4_tikhonov015_seed42.pth
+!experimental/v4/models/pinn_v4_tikhonov015_seed123.pth
+!experimental/v4/models/pinn_v4_tikhonov015_seed456.pth
+
+experimental/v4/histories/*
+!experimental/v4/histories/pinn_v4_tikhonov015_seed*.npy
+
+# Allow designated publication figures & frontend assets
+!experimental/v4/results/step64_figures/*.png
+!experimental/v4/results/step63_figures/*.png
+!frontend/src/assets/hero.png
