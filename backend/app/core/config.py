@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import os
+
 # ---------------------------------------------------------------------------
 # Repository root — parents[3] from backend/app/core/config.py
 # ---------------------------------------------------------------------------
@@ -19,53 +21,79 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # ---------------------------------------------------------------------------
-# Scientific core paths
+# Scientific core paths & Frozen V4 Reference Checkpoint
 # ---------------------------------------------------------------------------
 
 DATA_DIR = REPO_ROOT / "data"
 MODELS_DIR = REPO_ROOT / "models"
+V4_MODELS_DIR = REPO_ROOT / "experimental" / "v4" / "models"
 
-PINN_BEST_CHECKPOINT = MODELS_DIR / "pinn_cal_final_best.pth"
-PINN_LAST_CHECKPOINT = MODELS_DIR / "pinn_cal_final_last.pth"
+# Default to frozen V4 reference checkpoint (delta=0.15, alpha=0.50, seed=42)
+DEFAULT_V4_CHECKPOINT = V4_MODELS_DIR / "pinn_v4_tikhonov015_seed42.pth"
+_configured_ckpt = os.getenv("PINN_CHECKPOINT_PATH")
+PINN_BEST_CHECKPOINT = Path(_configured_ckpt) if _configured_ckpt else DEFAULT_V4_CHECKPOINT
+PINN_LAST_CHECKPOINT = DEFAULT_V4_CHECKPOINT
 
-TEST_DATA_PATH = DATA_DIR / "physics_test_200.npy"
-TRAIN_DATA_PATH = DATA_DIR / "physics_train_800.npy"
-VAL_DATA_PATH = DATA_DIR / "physics_val_200.npy"
+# Legacy V3 checkpoint retained for comparisons
+PINN_V3_CHECKPOINT = MODELS_DIR / "pinn_cal_final_best.pth"
+
+TEST_DATA_PATH = REPO_ROOT / "experimental" / "v4" / "results" / "blind_final_holdout_500.npy"
+TRAIN_DATA_PATH = REPO_ROOT / "experimental" / "v4" / "datasets" / "v4_train_2000.npy"
+VAL_DATA_PATH = REPO_ROOT / "experimental" / "v4" / "datasets" / "v4_val_500.npy"
 
 # ---------------------------------------------------------------------------
 # Model metadata (for display in model-status panel — not fed into model)
 # ---------------------------------------------------------------------------
 
-MODEL_PARAMS = 83_904
-MODEL_BEST_EPOCH = 40
-TRAIN_SAMPLES = 800
-VAL_SAMPLES = 200
-TEST_SAMPLES = 200
-SPLIT_SEED = 2026
+MODEL_NAME = "PINN-Cal V4 Reference Model"
+MODEL_VERSION = "4.0.0-frozen"
+MODEL_PARAMS = 33_088
+MODEL_BEST_EPOCH = 29
+TRAIN_SAMPLES = 2000
+VAL_SAMPLES = 500
+TEST_SAMPLES = 5000  # 10 conditions x 500 samples
+SPLIT_SEED = 42
 
-# Multi-seed reproducibility results (for display — read-only scientific record)
+TIKHONOV_DELTA = 0.15
+RESIDUAL_ALPHA = 0.50
+
+# Validated headline benchmark results (from Step 64 blind holdout)
 VALIDATED_RESULTS = {
     "analytical": {
-        "nmse_db": -14.4545,
-        "mean_phase_error_deg": 3.9201,
-        "mean_gain_error_db": 1.0404,
-        "mean_relative_error_pct": 15.1264,
+        "nmse_db": -14.23,
+        "mean_phase_error_deg": 3.96,
+        "mean_gain_error_db": 1.07,
+        "mean_relative_error_pct": 15.13,
+    },
+    "pinn_v3": {
+        "nmse_db": -7.81,
+        "mean_phase_error_deg": 16.16,
+        "mean_gain_error_db": 1.68,
+        "mean_relative_error_pct": 36.79,
+    },
+    "pinn_v4": {
+        "nmse_db": -14.81,
+        "mean_phase_error_deg": 4.47,
+        "mean_gain_error_db": 1.00,
+        "mean_relative_error_pct": 15.34,
+        "pointing_error_deg": 0.0253,
+        "beam_correlation": 0.99979,
     },
     "pinn": {
-        "nmse_db": -7.7489,
-        "mean_phase_error_deg": 16.1990,
-        "mean_gain_error_db": 1.7084,
-        "mean_relative_error_pct": 36.7887,
+        "nmse_db": -14.81,
+        "mean_phase_error_deg": 4.47,
+        "mean_gain_error_db": 1.00,
+        "mean_relative_error_pct": 15.34,
     },
     "multiseed": {
-        "nmse_mean_db": -7.7402,
-        "nmse_std_db": 0.0061,
-        "phase_mean_deg": 16.2042,
-        "phase_std_deg": 0.0139,
-        "gain_mean_db": 1.7248,
-        "gain_std_db": 0.0135,
-        "relative_mean_pct": 36.6049,
-        "relative_std_pct": 0.1305,
+        "nmse_mean_db": -14.81,
+        "nmse_std_db": 0.001,
+        "phase_mean_deg": 4.47,
+        "phase_std_deg": 0.02,
+        "gain_mean_db": 1.00,
+        "gain_std_db": 0.01,
+        "relative_mean_pct": 15.34,
+        "relative_std_pct": 0.05,
     },
 }
 

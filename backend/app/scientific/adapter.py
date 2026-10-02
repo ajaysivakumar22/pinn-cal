@@ -64,6 +64,12 @@ try:
         M,
     )
 
+    from experimental.v4.pinn_v4_model import (  # type: ignore[import]
+        PINNCalV4,
+        FixedPhysicsPreconditioner,
+        BoundedResidualDenoiser,
+    )
+
     from calibration_dataset import (  # type: ignore[import]
         DatasetConfig,
         generate_sample,
@@ -89,6 +95,9 @@ except Exception as _exc:
     ArrayConfig = _Stub  # type: ignore
     DEFAULT_CONFIG = None  # type: ignore
     PINNCalV3 = None  # type: ignore
+    PINNCalV4 = None  # type: ignore
+    FixedPhysicsPreconditioner = None  # type: ignore
+    BoundedResidualDenoiser = None  # type: ignore
     DEVICE = None  # type: ignore
     INPUT_DIM = 130  # type: ignore
     OUTPUT_DIM = 128  # type: ignore

@@ -25,17 +25,23 @@ import numpy as np
 from backend.app.scientific.adapter import (
     SCIENTIFIC_CORE_AVAILABLE,
     SCIENTIFIC_CORE_ERROR,
+    PINNCalV4,
     PINNCalV3,
+    DEFAULT_CONFIG,
     DEVICE,
     M,
 )
 from backend.app.core.config import (
     PINN_BEST_CHECKPOINT,
+    MODEL_NAME,
+    MODEL_VERSION,
     MODEL_PARAMS,
     MODEL_BEST_EPOCH,
     TRAIN_SAMPLES,
     VAL_SAMPLES,
     TEST_SAMPLES,
+    TIKHONOV_DELTA,
+    RESIDUAL_ALPHA,
 )
 
 
@@ -87,7 +93,12 @@ class ModelService:
         try:
             t0 = time.monotonic()
 
-            model = PINNCalV3().to(DEVICE)
+            model = PINNCalV4(
+                config=DEFAULT_CONFIG,
+                bounded=True,
+                alpha=RESIDUAL_ALPHA,
+                delta=TIKHONOV_DELTA,
+            ).to(DEVICE)
 
             state = torch.load(
                 str(checkpoint_path),
@@ -124,7 +135,7 @@ class ModelService:
         Returns
         -------
         np.ndarray
-            Shape (N, 128) — predicted correction coefficients.
+            Shape (N, 128) — predicted correction coefficients c_hat.
             [real(C_1..C_64), imag(C_1..C_64)]
 
         Raises
@@ -138,12 +149,43 @@ class ModelService:
             )
 
         x_tensor = torch.tensor(x, dtype=torch.float32, device=DEVICE)
-        prediction = self._model(x_tensor)
-        return prediction.detach().cpu().numpy()
+        out = self._model(x_tensor)
+        if isinstance(out, tuple):
+            c_hat = out[0]
+            c_hat_np = c_hat.detach().cpu().numpy()
+            return np.concatenate(
+                [c_hat_np.real.astype(np.float32), c_hat_np.imag.astype(np.float32)],
+                axis=-1,
+            )
+        else:
+            return out.detach().cpu().numpy()
+
+    @torch.no_grad()
+    def predict_v4(self, x: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Run PINN V4 inference returning the full decomposition:
+        (c_hat, delta_c_real, x_prior).
+        """
+        if not self._loaded or self._model is None:
+            raise RuntimeError(
+                f"PINN model not loaded: {self._load_error}"
+            )
+
+        x_tensor = torch.tensor(x, dtype=torch.float32, device=DEVICE)
+        c_hat, delta_c, x_prior = self._model(x_tensor)
+        return (
+            c_hat.detach().cpu().numpy(),
+            delta_c.detach().cpu().numpy(),
+            x_prior.detach().cpu().numpy(),
+        )
 
     # -----------------------------------------------------------------------
     # Properties
     # -----------------------------------------------------------------------
+
+    @property
+    def model(self):
+        return self._model
 
     @property
     def loaded(self) -> bool:
@@ -157,19 +199,37 @@ class ModelService:
     def uptime_s(self) -> float:
         return time.monotonic() - self._start_time
 
+    @property
+    def total_parameters(self) -> int:
+        if self._model is not None:
+            return sum(p.numel() for p in self._model.parameters())
+        return MODEL_PARAMS
+
+    @property
+    def trainable_parameters(self) -> int:
+        if self._model is not None:
+            return sum(p.numel() for p in self._model.parameters() if p.requires_grad)
+        return MODEL_PARAMS
+
     # -----------------------------------------------------------------------
     # Status dict (for /api/model-status endpoint)
     # -----------------------------------------------------------------------
 
     def status_dict(self) -> dict:
         return {
-            "model_name": "PINN-Cal final",
-            "architecture": "PINNCalV3",
+            "model_name": MODEL_NAME,
+            "version": MODEL_VERSION,
+            "architecture": "PINNCalV4 (PhysicsPreconditioner + BoundedResidualDenoiser)",
+            "tikhonov_delta": TIKHONOV_DELTA,
+            "residual_alpha": RESIDUAL_ALPHA,
+            "bounded": True,
             "input_dim": 130,
             "output_dim": 128,
-            "hidden_dims": [256, 128, 64],
-            "total_parameters": MODEL_PARAMS,
+            "hidden_dims": [128, 64, 128],
+            "total_parameters": self.total_parameters,
+            "trainable_parameters": self.trainable_parameters,
             "checkpoint": str(PINN_BEST_CHECKPOINT),
+            "checkpoint_path": str(PINN_BEST_CHECKPOINT),
             "checkpoint_available": PINN_BEST_CHECKPOINT.exists(),
             "best_epoch": MODEL_BEST_EPOCH,
             "train_samples": TRAIN_SAMPLES,
@@ -190,7 +250,7 @@ class ModelService:
                 "frequency_hz": 28e9,
                 "frequency_label": "28 GHz",
                 "note": (
-                    "PINN calibration requires exactly 64 elements at 28 GHz. "
+                    "PINN-Cal V4 calibration requires exactly 64 elements at 28 GHz. "
                     "Other configurations run physics simulation only."
                 ),
             },
