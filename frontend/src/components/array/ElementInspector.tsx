@@ -8,29 +8,58 @@ export const ElementInspector: React.FC = () => {
   const elements = simulationResult?.elements;
   const numElements = elements?.length ?? 64;
 
-  if (!elements || selectedElement === null || selectedElement >= elements.length) {
+  // Active element index fallback
+  const activeIdx = selectedElement !== null && selectedElement < numElements ? selectedElement : 16;
+  const elem = elements?.[activeIdx];
+  const n = activeIdx + 1;
+
+  if (!elements || !elem) {
     return (
-      <div className="card element-inspector-card empty-state" style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 40 }}>
-        <div style={{ textAlign: 'center', color: 'var(--color-text-secondary)' }}>
+      <div className="card element-inspector-card empty-state" style={{ padding: 40, textAlign: 'center' }}>
+        <div style={{ color: 'var(--color-text-secondary)' }}>
           <div style={{ fontSize: '2.5rem', marginBottom: 12 }}>🔬</div>
-          <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#0f172a', marginBottom: 6 }}>
+          <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--color-text-primary)', marginBottom: 6 }}>
             Select an Antenna Element
           </h3>
-          <p style={{ fontSize: '0.9375rem', color: 'var(--color-text-secondary)', maxWidth: 360, margin: '0 auto' }}>
-            Click any patch in the live 64-element array above to inspect its transceiver RF metrics and neural diagnosis.
+          <p style={{ fontSize: '1rem', color: 'var(--color-text-secondary)', maxWidth: 420, margin: '0 auto' }}>
+            Click any element in the live 64-element ULA above to inspect its transceiver RF metrics and neural compensation state.
           </p>
         </div>
       </div>
     );
   }
 
-  const elem = elements[selectedElement];
-  const n = elem.element_index + 1;
+  // 1. Observed / Impaired Values
+  const obsPhaseError = elem.phase_error_deg;
+  const obsGainError = elem.gain_error_db;
+  const hwPhase = elem.hardware_phase_deg;
+  const hwMag = elem.hardware_magnitude;
+  const isSevereImpaired = Math.abs(obsGainError) > 1.2 || Math.abs(obsPhaseError) > 12;
 
-  // Derived Values
+  // 2. V4 Estimated Compensation Values: c_hat = c_prior + Δc
+  const cpRe = elem.pinn_correction_real ?? elem.analytical_correction_real ?? 1.0;
+  const cpIm = elem.pinn_correction_imag ?? elem.analytical_correction_imag ?? 0.0;
+  let cMag = elem.pinn_correction_magnitude;
+  let cPhase = elem.pinn_correction_phase_deg;
+  if (cMag == null) {
+    cMag = Math.sqrt(cpRe * cpRe + cpIm * cpIm);
+  }
+  if (cPhase == null) {
+    cPhase = (Math.atan2(cpIm, cpRe) * 180) / Math.PI;
+  }
+  const cGainDb = 20 * Math.log10(Math.max(cMag, 1e-12));
+  const isPinnAvailable = simulationResult?.pinn_available ?? false;
+
+  // 3. Post-Compensation Values: V_post,n = V_hw,n · c_hat,n
+  const vCorrRe = elem.hardware_real * cpRe - elem.hardware_imag * cpIm;
+  const vCorrIm = elem.hardware_real * cpIm + elem.hardware_imag * cpRe;
+  const corrPhase = (Math.atan2(vCorrIm, vCorrRe) * 180) / Math.PI;
+  const corrMag = Math.sqrt(vCorrRe * vCorrRe + vCorrIm * vCorrIm);
+  const corrGainDb = 20 * Math.log10(Math.max(corrMag, 1e-12));
+
+  // Residual relative to ideal reference
   const truePhase = elem.true_phase_error_deg ?? elem.phase_error_deg;
   const trueGain = elem.true_gain_error_db ?? elem.gain_error_db;
-
   const pinnEstPhase =
     elem.pinn_estimated_phase_error_deg ??
     (elem.pinn_correction_phase_deg !== null ? -elem.pinn_correction_phase_deg : null);
@@ -40,430 +69,292 @@ export const ElementInspector: React.FC = () => {
       ? -20 * Math.log10(Math.max(elem.pinn_correction_magnitude, 1e-6))
       : null);
 
-  const phaseRes =
+  const displayPhaseRes =
     elem.phase_error_residual_deg ??
     (pinnEstPhase !== null
       ? ((((truePhase - pinnEstPhase + 180) % 360) + 360) % 360) - 180
-      : null);
-  const gainRes =
-    elem.gain_error_residual_db ?? (pinnEstGain !== null ? trueGain - pinnEstGain : null);
+      : elem.analytical_phase_residual_deg ?? (corrPhase - elem.ideal_phase_deg));
 
-  const compPhase =
-    elem.compensation_phase_deg ??
-    (pinnEstPhase !== null ? -pinnEstPhase : elem.analytical_correction_phase_deg);
-  const compGain =
-    elem.compensation_gain_db ??
+  const displayGainRes =
+    elem.gain_error_residual_db ??
     (pinnEstGain !== null
-      ? -pinnEstGain
-      : 20 * Math.log10(Math.max(elem.analytical_correction_magnitude, 1e-6)));
-
-  const isPinnAvailable = simulationResult?.pinn_available ?? false;
-
-  // Displayed estimate
-  const displayEstPhase = pinnEstPhase ?? elem.analytical_estimated_phase_error_deg ?? 0;
-  const displayEstGain = pinnEstGain ?? elem.analytical_estimated_gain_error_db ?? 0;
-  const displayPhaseRes = phaseRes ?? elem.analytical_phase_residual_deg ?? 0;
-  const displayGainRes = gainRes ?? elem.analytical_gain_residual_db ?? 0;
+      ? trueGain - pinnEstGain
+      : elem.analytical_gain_residual_db ?? corrGainDb);
 
   return (
-    <div className="card element-inspector-card" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      {/* Inspector Header with Stepper */}
-      <div
-        className="card-header"
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          background: 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)',
-          borderBottom: '1px solid #cbd5e1',
-          padding: '14px 20px',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span
-            style={{
-              padding: '6px 14px',
-              borderRadius: 6,
-              background: '#0f172a',
-              color: '#ffffff',
-              fontFamily: 'var(--font-mono)',
-              fontWeight: 800,
-              fontSize: '1rem',
-              letterSpacing: '0.04em',
-            }}
-          >
+    <div className="card element-inspector-card" role="region" aria-label="Selected Element Detail Inspector">
+      {/* 1. INSPECTOR HEADER WITH ELEMENT NAVIGATION (Requirements 10 & 11) */}
+      <div className="inspector-header-bar">
+        {/* Element Indicator with Large Typography (24–32px) */}
+        <div className="inspector-badge-group">
+          <div className="inspector-element-badge">
             ELEMENT #{n}
-          </span>
-          <div>
-            <h3 style={{ fontSize: '1.0625rem', color: '#0f172a', fontWeight: 800, margin: 0 }}>
-              RF Transceiver Diagnostics
+          </div>
+          <div className="inspector-title-sub">
+            <h3 className="inspector-title">
+              Transceiver RF Microstrip Port #{n}
             </h3>
-            <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>
-              Port impedance: Z_in = 73.1 + 42.5j Ω
+            <span className="inspector-port-impedance">
+              Port Input Impedance: Z_in = 73.1 + 42.5j Ω · Reciprocal S-Parameters
             </span>
           </div>
         </div>
 
-        {/* Stepper Controls */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {/* Stepper & Numeric Selector Controls */}
+        <div className="inspector-nav-controls">
           <button
-            className="btn btn-secondary"
-            onClick={() => setSelectedElement(Math.max(0, selectedElement - 1))}
-            disabled={selectedElement === 0}
-            style={{ padding: '6px 12px', fontSize: '0.875rem', fontWeight: 700 }}
+            type="button"
+            className="btn btn-secondary inspector-nav-btn"
+            onClick={() => setSelectedElement(Math.max(0, activeIdx - 1))}
+            disabled={activeIdx === 0}
             title="Inspect previous element"
           >
             ◀ Prev
           </button>
-          <span
-            style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: '0.875rem',
-              color: 'var(--color-text-primary)',
-              fontWeight: 700,
-              minWidth: 60,
-              textAlign: 'center',
-            }}
-          >
-            {n} / {numElements}
-          </span>
+
+          <div className="inspector-element-counter" title="Current element out of 64">
+            <span className="counter-curr">{n}</span>
+            <span className="counter-sep">/</span>
+            <span className="counter-total">{numElements}</span>
+          </div>
+
           <button
-            className="btn btn-secondary"
-            onClick={() => setSelectedElement(Math.min(numElements - 1, selectedElement + 1))}
-            disabled={selectedElement === numElements - 1}
-            style={{ padding: '6px 12px', fontSize: '0.875rem', fontWeight: 700 }}
+            type="button"
+            className="btn btn-secondary inspector-nav-btn"
+            onClick={() => setSelectedElement(Math.min(numElements - 1, activeIdx + 1))}
+            disabled={activeIdx === numElements - 1}
             title="Inspect next element"
           >
             Next ▶
           </button>
+
+          {/* Quick Element Selector Dropdown */}
+          <div className="inspector-dropdown-wrapper">
+            <label htmlFor="element-quick-select" className="sr-only">Jump to element</label>
+            <select
+              id="element-quick-select"
+              className="form-select inspector-select"
+              value={activeIdx}
+              onChange={(e) => setSelectedElement(Number(e.target.value))}
+              aria-label="Directly jump to element"
+            >
+              {Array.from({ length: numElements }, (_, i) => (
+                <option key={i} value={i}>
+                  Element #{i + 1}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Quick Jump Pills */}
+          <div className="inspector-quick-pills">
+            <button
+              type="button"
+              className={`pill-btn ${activeIdx === 0 ? 'active' : ''}`}
+              onClick={() => setSelectedElement(0)}
+              title="Jump to element 1 (aperture edge)"
+            >
+              #1
+            </button>
+            <button
+              type="button"
+              className={`pill-btn ${activeIdx === 31 ? 'active' : ''}`}
+              onClick={() => setSelectedElement(31)}
+              title="Jump to element 32 (aperture center)"
+            >
+              #32
+            </button>
+            <button
+              type="button"
+              className={`pill-btn ${activeIdx === 63 ? 'active' : ''}`}
+              onClick={() => setSelectedElement(63)}
+              title="Jump to element 64 (aperture edge)"
+            >
+              #64
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="card-body" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: 18 }}>
-        {/* SECTION 1: PINN DETECTOR HERO (Primary Diagnostic) */}
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: '1.125rem' }}>🎯</span>
-              <h4 style={{ fontSize: '0.9375rem', fontWeight: 800, color: '#0f172a', letterSpacing: '0.04em' }}>
-                NEURAL DIAGNOSIS (PINN DETECTOR)
-              </h4>
+      {/* 2. FOUR COMPARATIVE STATE CARDS (Requirements 5, 6, 7, 8, 10, 22) */}
+      <div className="inspector-states-grid">
+        {/* CARD 01 — IDEAL EXCITATION (REFERENCE) */}
+        <div className="state-detail-card card-ideal">
+          <div className="state-card-header">
+            <div className="state-card-num-title">
+              <span className="state-mini-badge state-badge-ideal">01</span>
+              <h4 className="state-card-title">IDEAL EXCITATION</h4>
             </div>
-            <span
-              style={{
-                fontSize: '0.75rem',
-                fontWeight: 700,
-                color: isPinnAvailable ? '#6d28d9' : '#0e7490',
-                background: isPinnAvailable ? '#f3e8ff' : '#cffafe',
-                padding: '2px 8px',
-                borderRadius: 4,
-              }}
-            >
-              {isPinnAvailable ? 'PINN INFERENCE ACTIVE' : 'ANALYTICAL BACKUP'}
-            </span>
+            <span className="state-role-tag role-reference">REFERENCE</span>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            {/* Phase Impairment Detector Card */}
-            <div
-              style={{
-                padding: '16px',
-                borderRadius: 8,
-                border: '2px solid #e9d5ff',
-                background: 'linear-gradient(180deg, #faf5ff 0%, #ffffff 100%)',
-                boxShadow: '0 2px 4px rgba(124, 58, 237, 0.05)',
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#6b21a8' }}>
-                  PHASE IMPAIRMENT
-                </span>
-                <ConceptTrigger conceptKey="phase_error" label="Theory" />
-              </div>
+          <p className="state-card-desc">
+            Theoretical unit amplitude excitation with progressive steering delay.
+          </p>
 
-              {/* Large Estimated Value */}
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, margin: '6px 0' }}>
-                <span
-                  style={{
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: '2rem',
-                    fontWeight: 900,
-                    color: '#581c87',
-                    letterSpacing: '-0.02em',
-                  }}
-                >
-                  {displayEstPhase > 0 ? `+${displayEstPhase.toFixed(2)}°` : `${displayEstPhase.toFixed(2)}°`}
-                </span>
-                <span
-                  style={{
-                    fontSize: '0.6875rem',
-                    fontWeight: 800,
-                    background: '#8b5cf6',
-                    color: '#ffffff',
-                    padding: '2px 6px',
-                    borderRadius: 3,
-                  }}
-                >
-                  PINN ESTIMATE
-                </span>
-              </div>
-
-              {/* Circular Polar Gauge Needle */}
-              <div style={{ display: 'flex', justifyContent: 'center', margin: '8px 0' }}>
-                <PhaseGaugeSVG truePhase={truePhase} estPhase={displayEstPhase} />
-              </div>
-
-              <div style={{ fontSize: '0.8125rem', color: '#6b21a8', lineHeight: 1.4 }}>
-                Aperture phase deviation detected from coupled currents.
-              </div>
-            </div>
-
-            {/* Gain Impairment Detector Card */}
-            <div
-              style={{
-                padding: '16px',
-                borderRadius: 8,
-                border: '2px solid #e9d5ff',
-                background: 'linear-gradient(180deg, #faf5ff 0%, #ffffff 100%)',
-                boxShadow: '0 2px 4px rgba(124, 58, 237, 0.05)',
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#6b21a8' }}>
-                  GAIN IMPAIRMENT
-                </span>
-                <ConceptTrigger conceptKey="gain_error" label="Theory" />
-              </div>
-
-              {/* Large Estimated Value */}
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, margin: '6px 0' }}>
-                <span
-                  style={{
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: '2rem',
-                    fontWeight: 900,
-                    color: '#581c87',
-                    letterSpacing: '-0.02em',
-                  }}
-                >
-                  {displayEstGain > 0 ? `+${displayEstGain.toFixed(2)} dB` : `${displayEstGain.toFixed(2)} dB`}
-                </span>
-                <span
-                  style={{
-                    fontSize: '0.6875rem',
-                    fontWeight: 800,
-                    background: '#8b5cf6',
-                    color: '#ffffff',
-                    padding: '2px 6px',
-                    borderRadius: 3,
-                  }}
-                >
-                  PINN ESTIMATE
-                </span>
-              </div>
-
-              {/* Horizontal Gain Bar Gauge */}
-              <div style={{ margin: '8px 0' }}>
-                <GainGaugeSVG trueGain={trueGain} estGain={displayEstGain} />
-              </div>
-
-              <div style={{ fontSize: '0.8125rem', color: '#6b21a8', lineHeight: 1.4 }}>
-                Amplifier amplitude gain mismatch relative to nominal 0 dB.
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* SECTION 2: COMPENSATION ACTION FLOW */}
-        <div
-          style={{
-            padding: '14px 18px',
-            background: '#f0fdf4',
-            border: '1.5px solid #86efac',
-            borderRadius: 8,
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <span style={{ fontSize: '0.875rem', fontWeight: 800, color: '#166534' }}>
-              ⚡ INVERSE COMPENSATION WEIGHTS APPLIED (C = H⁻¹)
-            </span>
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8125rem', color: '#15803d', fontWeight: 700 }}>
-              Corrected State: V_corr = V_hw · C
-            </span>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <div style={{ background: '#ffffff', padding: '10px 14px', borderRadius: 6, border: '1px solid #bbf7d0' }}>
-              <span style={{ fontSize: '0.75rem', color: '#166534', fontWeight: 600 }}>PHASE COMPENSATION (Δϕ):</span>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.25rem', fontWeight: 800, color: '#15803d' }}>
-                {compPhase !== null ? (compPhase > 0 ? `+${compPhase.toFixed(2)}°` : `${compPhase.toFixed(2)}°`) : '0.00°'}
-              </div>
-            </div>
-
-            <div style={{ background: '#ffffff', padding: '10px 14px', borderRadius: 6, border: '1px solid #bbf7d0' }}>
-              <span style={{ fontSize: '0.75rem', color: '#166534', fontWeight: 600 }}>GAIN COMPENSATION (ΔG):</span>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.25rem', fontWeight: 800, color: '#15803d' }}>
-                {compGain !== null ? (compGain > 0 ? `+${compGain.toFixed(2)} dB` : `${compGain.toFixed(2)} dB`) : '0.00 dB'}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* SECTION 3: OBSERVED PORT SIGNAL */}
-        <div
-          style={{
-            padding: '12px 16px',
-            background: '#f8fafc',
-            border: '1px solid #e2e8f0',
-            borderRadius: 6,
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}
-        >
-          <div>
-            <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#334155' }}>
-              OBSERVED CURRENT AT TRANSCEIVER PORT (I_obs)
-            </span>
-            <div style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginTop: 2 }}>
-              Result of excitation coupled through mutual impedance matrix Z_coupled
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 14, fontFamily: 'var(--font-mono)', fontSize: '0.9375rem' }}>
-            <span>Re: <strong>{elem.observed_real.toFixed(4)}</strong></span>
-            <span>Im: <strong>{elem.observed_imag.toFixed(4)}</strong></span>
-          </div>
-        </div>
-
-        {/* SECTION 4: SIMULATION GROUND TRUTH (VALIDATION REFERENCE) */}
-        <div
-          style={{
-            padding: '14px 16px',
-            background: '#fef2f2',
-            border: '1px dashed #fca5a5',
-            borderRadius: 8,
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontSize: '0.875rem' }}>🔍</span>
-              <span style={{ fontSize: '0.8125rem', fontWeight: 800, color: '#991b1b' }}>
-                SIMULATION GROUND TRUTH & RESIDUAL
+          <div className="state-metric-rows">
+            <div className="metric-row">
+              <span className="metric-label">Phase (ϕ_ideal):</span>
+              <span className="inspector-metric-val metric-blue">
+                {elem.ideal_phase_deg > 0 ? `+${elem.ideal_phase_deg.toFixed(2)}°` : `${elem.ideal_phase_deg.toFixed(2)}°`}
               </span>
             </div>
-            <span
-              style={{
-                fontSize: '0.6875rem',
-                fontWeight: 800,
-                background: '#fee2e2',
-                color: '#991b1b',
-                padding: '2px 8px',
-                borderRadius: 4,
-                border: '1px solid #fecaca',
-              }}
-            >
-              SIMULATION ONLY · NOT ACCESSIBLE TO PHYSICAL PINN
+            <div className="metric-row">
+              <span className="metric-label">Gain / Magnitude:</span>
+              <span className="inspector-metric-val metric-blue">
+                0.00 dB <span className="val-sub">(1.000)</span>
+              </span>
+            </div>
+            <div className="metric-row sub-row">
+              <span className="metric-label">Complex Excitation:</span>
+              <span className="metric-val-mono">
+                {elem.ideal_real.toFixed(3)} + {elem.ideal_imag >= 0 ? '+' : ''}{elem.ideal_imag.toFixed(3)}j
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* CARD 02 — OBSERVED / IMPAIRED */}
+        <div className={`state-detail-card card-hardware ${isSevereImpaired ? 'border-alert' : ''}`}>
+          <div className="state-card-header">
+            <div className="state-card-num-title">
+              <span className="state-mini-badge state-badge-hardware">02</span>
+              <h4 className="state-card-title">OBSERVED / IMPAIRED</h4>
+            </div>
+            <span className={`state-role-tag ${isSevereImpaired ? 'role-alert' : 'role-impaired'}`}>
+              {isSevereImpaired ? 'SEVERE IMPAIRMENT' : 'HARDWARE STATE'}
             </span>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, fontSize: '0.875rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: '#7f1d1d' }}>True Phase Error:</span>
-              <strong style={{ fontFamily: 'var(--font-mono)', color: '#991b1b' }}>
-                {truePhase > 0 ? `+${truePhase.toFixed(2)}°` : `${truePhase.toFixed(2)}°`}
-              </strong>
-            </div>
+          <p className="state-card-desc">
+            Transceiver state disturbed by reciprocal mutual coupling and RF error.
+          </p>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: '#7f1d1d' }}>Phase Residual:</span>
-              <strong style={{ fontFamily: 'var(--font-mono)', color: '#16a34a' }}>
+          <div className="state-metric-rows">
+            <div className="metric-row">
+              <span className="metric-label">Phase Impairment:</span>
+              <span className={`inspector-metric-val ${Math.abs(obsPhaseError) > 10 ? 'metric-red' : 'metric-amber'}`}>
+                {obsPhaseError > 0 ? `+${obsPhaseError.toFixed(2)}°` : `${obsPhaseError.toFixed(2)}°`}
+              </span>
+            </div>
+            <div className="metric-row">
+              <span className="metric-label">Gain Impairment:</span>
+              <span className={`inspector-metric-val ${Math.abs(obsGainError) > 1.0 ? 'metric-red' : 'metric-amber'}`}>
+                {obsGainError > 0 ? `+${obsGainError.toFixed(2)} dB` : `${obsGainError.toFixed(2)} dB`}
+              </span>
+            </div>
+            <div className="metric-row sub-row">
+              <span className="metric-label">Observed Current (I_obs):</span>
+              <span className="metric-val-mono">
+                {elem.observed_real.toFixed(4)} + {elem.observed_imag >= 0 ? '+' : ''}{elem.observed_imag.toFixed(4)}j
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* CARD 03 — V4 ESTIMATED COMPENSATION */}
+        <div className="state-detail-card card-pinn">
+          <div className="state-card-header">
+            <div className="state-card-num-title">
+              <span className="state-mini-badge state-badge-pinn">03</span>
+              <h4 className="state-card-title">V4 ESTIMATED COMPENSATION</h4>
+            </div>
+            <span className="state-role-tag role-pinn">
+              {isPinnAvailable ? 'V4 ESTIMATE' : 'ANALYTICAL BASELINE'}
+            </span>
+          </div>
+
+          <p className="state-card-desc">
+            Complex compensation weights ĉ = c_prior + Δc estimated by PINN-Cal V4.
+          </p>
+
+          <div className="state-metric-rows">
+            <div className="metric-row">
+              <span className="metric-label">Estimated Phase (∠ĉ):</span>
+              <span className="inspector-metric-val metric-purple">
+                {cPhase > 0 ? `+${cPhase.toFixed(2)}°` : `${cPhase.toFixed(2)}°`}
+              </span>
+            </div>
+            <div className="metric-row">
+              <span className="metric-label">Estimated Gain (|ĉ|):</span>
+              <span className="inspector-metric-val metric-purple">
+                {cGainDb > 0 ? `+${cGainDb.toFixed(2)} dB` : `${cGainDb.toFixed(2)} dB`}{' '}
+                <span className="val-sub">({cMag.toFixed(3)})</span>
+              </span>
+            </div>
+            <div className="metric-row sub-row">
+              <span className="metric-label">Weight Vector (ĉ_n):</span>
+              <span className="metric-val-mono">
+                {cpRe.toFixed(4)} + {cpIm >= 0 ? '+' : ''}{cpIm.toFixed(4)}j
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* CARD 04 — POST-COMPENSATION STATE */}
+        <div className="state-detail-card card-calibrated">
+          <div className="state-card-header">
+            <div className="state-card-num-title">
+              <span className="state-mini-badge state-badge-calibrated">04</span>
+              <h4 className="state-card-title">POST-COMPENSATION STATE</h4>
+            </div>
+            <span className="state-role-tag role-restored">RESTORED STATE</span>
+          </div>
+
+          <p className="state-card-desc">
+            Restored array excitation: V_post,n = V_hw,n · ĉ_n.
+          </p>
+
+          <div className="state-metric-rows">
+            <div className="metric-row">
+              <span className="metric-label">Restored Phase:</span>
+              <span className="inspector-metric-val metric-green">
+                {corrPhase > 0 ? `+${corrPhase.toFixed(2)}°` : `${corrPhase.toFixed(2)}°`}
+              </span>
+            </div>
+            <div className="metric-row">
+              <span className="metric-label">Restored Gain:</span>
+              <span className="inspector-metric-val metric-green">
+                {corrGainDb > 0 ? `+${corrGainDb.toFixed(2)} dB` : `${corrGainDb.toFixed(2)} dB`}{' '}
+                <span className="val-sub">({corrMag.toFixed(3)})</span>
+              </span>
+            </div>
+            <div className="metric-row sub-row">
+              <span className="metric-label">Residual Phase Error:</span>
+              <span className="metric-val-mono highlight-green">
                 {displayPhaseRes > 0 ? `+${displayPhaseRes.toFixed(2)}°` : `${displayPhaseRes.toFixed(2)}°`}
-              </strong>
+              </span>
             </div>
+          </div>
+        </div>
+      </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: '#7f1d1d' }}>True Gain Error:</span>
-              <strong style={{ fontFamily: 'var(--font-mono)', color: '#991b1b' }}>
-                {trueGain > 0 ? `+${trueGain.toFixed(2)} dB` : `${trueGain.toFixed(2)} dB`}
-              </strong>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: '#7f1d1d' }}>Gain Residual:</span>
-              <strong style={{ fontFamily: 'var(--font-mono)', color: '#16a34a' }}>
-                {displayGainRes > 0 ? `+${displayGainRes.toFixed(2)} dB` : `${displayGainRes.toFixed(2)} dB`}
-              </strong>
-            </div>
+      {/* 3. SIMULATION BENCHMARK REFERENCE STRIP (Requirement 22) */}
+      <div className="inspector-validation-strip" role="note" aria-label="Simulation Benchmark Reference">
+        <div className="validation-strip-left">
+          <span className="strip-info-icon">🔬</span>
+          <span className="strip-title">SIMULATION BENCHMARK REFERENCE:</span>
+          <span className="strip-note">Ground truth values from simulation engine — closed to physical neural inference.</span>
+        </div>
+        <div className="validation-strip-metrics">
+          <div className="val-chip">
+            <span className="val-k">True Phase Error:</span>
+            <span className="val-v">{truePhase > 0 ? `+${truePhase.toFixed(2)}°` : `${truePhase.toFixed(2)}°`}</span>
+          </div>
+          <div className="val-chip">
+            <span className="val-k">True Gain Error:</span>
+            <span className="val-v">{trueGain > 0 ? `+${trueGain.toFixed(2)} dB` : `${trueGain.toFixed(2)} dB`}</span>
+          </div>
+          <div className="val-chip highlight-res">
+            <span className="val-k">Phase Residual:</span>
+            <span className="val-v">{displayPhaseRes > 0 ? `+${displayPhaseRes.toFixed(2)}°` : `${displayPhaseRes.toFixed(2)}°`}</span>
+          </div>
+          <div className="val-chip highlight-res">
+            <span className="val-k">Gain Residual:</span>
+            <span className="val-v">{displayGainRes > 0 ? `+${displayGainRes.toFixed(2)} dB` : `${displayGainRes.toFixed(2)} dB`}</span>
           </div>
         </div>
       </div>
     </div>
-  );
-};
-
-// Subcomponent: Circular Phase Gauge SVG (Polar Dial)
-const PhaseGaugeSVG: React.FC<{ truePhase: number; estPhase: number }> = ({ truePhase, estPhase }) => {
-  const clamp = (v: number) => Math.max(-45, Math.min(45, v));
-  const trueAngle = (clamp(truePhase) / 45) * 60;
-  const estAngle = (clamp(estPhase) / 45) * 60;
-
-  return (
-    <svg width="150" height="80" viewBox="0 0 150 80">
-      {/* Gauge Arc Track */}
-      <path d="M 22 70 A 55 55 0 0 1 128 70" fill="none" stroke="#e2e8f0" strokeWidth="10" strokeLinecap="round" />
-      <path d="M 50 70 A 55 55 0 0 1 100 70" fill="none" stroke="#bbf7d0" strokeWidth="10" />
-
-      {/* Center Pivot */}
-      <circle cx="75" cy="70" r="5" fill="#0f172a" />
-
-      {/* True Phase Indicator (Red Tick, Ground Truth) */}
-      <g transform={`rotate(${trueAngle} 75 70)`}>
-        <line x1="75" y1="70" x2="75" y2="18" stroke="#dc2626" strokeWidth="2.5" strokeDasharray="3,2" />
-        <circle cx="75" cy="18" r="3.5" fill="#dc2626" />
-      </g>
-
-      {/* PINN Estimated Needle (Purple) */}
-      <g transform={`rotate(${estAngle} 75 70)`}>
-        <line x1="75" y1="70" x2="75" y2="20" stroke="#7c3aed" strokeWidth="3.5" strokeLinecap="round" />
-      </g>
-
-      {/* Scale Labels */}
-      <text x="18" y="78" fontSize="9" fill="#94a3b8" fontFamily="var(--font-mono)">-45°</text>
-      <text x="75" y="60" fontSize="11" fill="#581c87" fontWeight="800" textAnchor="middle" fontFamily="var(--font-mono)">
-        {estPhase > 0 ? `+${estPhase.toFixed(1)}°` : `${estPhase.toFixed(1)}°`}
-      </text>
-      <text x="132" y="78" fontSize="9" fill="#94a3b8" fontFamily="var(--font-mono)">+45°</text>
-    </svg>
-  );
-};
-
-// Subcomponent: Horizontal Gain Gauge Bar SVG
-const GainGaugeSVG: React.FC<{ trueGain: number; estGain: number }> = ({ trueGain, estGain }) => {
-  const toX = (db: number) => {
-    const clamped = Math.max(-4, Math.min(4, db));
-    return ((clamped + 4) / 8) * 190;
-  };
-
-  const trueX = toX(trueGain);
-  const estX = toX(estGain);
-
-  return (
-    <svg width="100%" height="48" viewBox="0 0 190 48">
-      {/* Background Track */}
-      <rect x="0" y="16" width="190" height="12" rx="6" fill="#f1f5f9" stroke="#cbd5e1" strokeWidth="1" />
-      {/* Center 0 dB Reference */}
-      <line x1="95" y1="12" x2="95" y2="32" stroke="#64748b" strokeWidth="1.5" strokeDasharray="2,2" />
-
-      {/* Ground Truth Marker (Red Triangle) */}
-      <polygon points={`${trueX-4},8 ${trueX+4},8 ${trueX},15`} fill="#dc2626" />
-
-      {/* PINN Estimate Pill (Purple) */}
-      <circle cx={estX} cy="22" r="7" fill="#7c3aed" stroke="#ffffff" strokeWidth="2" />
-
-      {/* Scale Labels */}
-      <text x="2" y="42" fontSize="9" fill="#94a3b8" fontFamily="var(--font-mono)">-4 dB</text>
-      <text x="95" y="42" fontSize="9" fill="#64748b" textAnchor="middle" fontFamily="var(--font-mono)">0 dB</text>
-      <text x="188" y="42" fontSize="9" fill="#94a3b8" textAnchor="end" fontFamily="var(--font-mono)">+4 dB</text>
-    </svg>
   );
 };

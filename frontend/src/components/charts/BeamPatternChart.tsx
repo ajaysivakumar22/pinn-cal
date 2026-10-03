@@ -25,10 +25,10 @@ export const BeamPatternChart: React.FC = () => {
     if (!beam) return [];
 
     const defs = [
-      { key: 'ideal',        label: 'Ideal',          trace: beam.ideal },
-      { key: 'uncalibrated', label: 'Uncalibrated',   trace: beam.uncalibrated },
-      { key: 'analytical',   label: 'Analytical',     trace: beam.analytical },
-      { key: 'pinn',         label: 'PINN',           trace: beam.pinn },
+      { key: 'ideal',        label: 'Ideal',              trace: beam.ideal },
+      { key: 'uncalibrated', label: 'Uncalibrated',       trace: beam.uncalibrated },
+      { key: 'analytical',   label: 'Analytical Baseline', trace: beam.analytical },
+      { key: 'pinn',         label: 'PINN-Cal V4',        trace: beam.pinn },
     ];
 
     return defs

@@ -43,9 +43,9 @@ export const BeforeAfterView: React.FC = () => {
         y: ana.power_db,
         type: 'scatter',
         mode: 'lines',
-        name: 'AFTER: Analytical Calibrated',
+        name: 'AFTER: Analytical Baseline Compensated',
         line: { color: '#0891b2', width: 2.5 },
-        hovertemplate: 'Analytical: %{y:.1f} dB at %{x:.1f}°<extra></extra>',
+        hovertemplate: 'Analytical Baseline: %{y:.1f} dB at %{x:.1f}°<extra></extra>',
       },
     ];
 
@@ -55,9 +55,9 @@ export const BeforeAfterView: React.FC = () => {
         y: pinn.power_db,
         type: 'scatter',
         mode: 'lines',
-        name: 'AFTER: PINN Calibrated',
+        name: 'AFTER: PINN-Cal V4 Compensated',
         line: { color: '#7c3aed', width: 2.5 },
-        hovertemplate: 'PINN: %{y:.1f} dB at %{x:.1f}°<extra></extra>',
+        hovertemplate: 'PINN-Cal V4: %{y:.1f} dB at %{x:.1f}°<extra></extra>',
       });
     }
 

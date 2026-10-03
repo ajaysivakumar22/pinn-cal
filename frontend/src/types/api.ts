@@ -172,12 +172,18 @@ export interface HealthStatus {
 
 export interface ModelStatus {
   model_name: string;
+  version: string;
   architecture: string;
+  tikhonov_delta: number;
+  residual_alpha: number;
+  bounded: boolean;
   input_dim: number;
   output_dim: number;
   hidden_dims: number[];
   total_parameters: number;
+  trainable_parameters: number;
   checkpoint: string;
+  checkpoint_path: string;
   checkpoint_available: boolean;
   best_epoch: number;
   train_samples: number;
@@ -197,7 +203,23 @@ export interface ModelStatus {
   };
   validated_results: {
     analytical: CalibrationMetrics & { mean_relative_error_pct: number };
+    pinn_v3?: CalibrationMetrics & { mean_relative_error_pct: number };
+    pinn_v4?: CalibrationMetrics & {
+      mean_relative_error_pct: number;
+      pointing_error_deg?: number;
+      beam_correlation?: number;
+    };
     pinn: CalibrationMetrics & { mean_relative_error_pct: number };
+    multiseed?: {
+      nmse_mean_db: number;
+      nmse_std_db: number;
+      phase_mean_deg: number;
+      phase_std_deg: number;
+      gain_mean_db: number;
+      gain_std_db: number;
+      relative_mean_pct: number;
+      relative_std_pct: number;
+    };
   };
   honesty_note: string;
 }
@@ -250,6 +272,7 @@ export type ArrayDisplayMode =
   | 'pinn';
 
 export type ActiveView =
+  | 'overview'
   | 'simulation'
   | 'calibration'
   | 'beam'

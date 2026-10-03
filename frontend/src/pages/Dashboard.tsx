@@ -45,23 +45,28 @@ export const Dashboard: React.FC = () => {
       )}
 
       {/* ====================================================================
-          STORY STAGE 01: WHAT IS WRONG?
-          The physical antenna array experience + experiment controls
+          STORY STAGE 01: THE 64-ELEMENT UNIFORM LINEAR ARRAY
+          The physical antenna array experience + live element inspection + controls
           ==================================================================== */}
-      <section id="section-simulation" className="story-stage-zone stage-array-zone" aria-label="Antenna Array and Hardware Impairment">
+      <section id="section-simulation" className="story-stage-zone stage-array-zone" aria-label="Live 64-Element Uniform Linear Array Experience">
         <div className="stage-zone-header">
           <div className="stage-num-badge">01</div>
           <div>
-            <h2 className="stage-zone-title">THE PHYSICAL IMPAIRMENT</h2>
+            <h2 className="stage-zone-title">LIVE 64-ELEMENT UNIFORM LINEAR ARRAY (ULA)</h2>
             <p className="stage-zone-desc">
-              Hardware variations and mutual coupling disturb the antenna excitation, deflecting the beam.
+              Primary scientific research visualization of the 64-Element Uniform Linear Array (ULA) at 28 GHz mmWave.
             </p>
           </div>
         </div>
 
-        {/* 2.5D Microstrip Patch Array */}
+        {/* 2.5D Antenna Array (ULA) Primary Instrument */}
         <div className="stage-visual-container">
           <AntennaArray />
+        </div>
+
+        {/* Selected Element Detail Inspector (Directly below array for instant inspection) */}
+        <div className="stage-inspector-wrapper">
+          <ElementInspector />
         </div>
 
         {/* Tactile Experiment Controls Console */}
@@ -76,8 +81,8 @@ export const Dashboard: React.FC = () => {
       </section>
 
       {/* ====================================================================
-          STORY STAGE 02 & 03: WHAT DOES PINN SEE & ESTIMATE?
-          The Neural Detector Architecture
+          STORY STAGE 02: PINN-CAL V4 FIVE-STAGE SCIENTIFIC PIPELINE
+          Physics + Bounded Residual Inverse Calibration Architecture
           ==================================================================== */}
       <PinnDetectorFlow />
 

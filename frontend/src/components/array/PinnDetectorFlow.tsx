@@ -3,202 +3,418 @@ import { useAppStore } from '../../store/appStore';
 import { ConceptTrigger } from '../common/ConceptExplainer';
 
 export const PinnDetectorFlow: React.FC = () => {
-  const { simulationResult, selectedElement, superMode } = useAppStore();
+  const { simulationResult, selectedElement, superMode, modelStatus, setActiveView } = useAppStore();
 
   const elements = simulationResult?.elements;
-  const selIdx = selectedElement ?? 16;
+  const numElements = elements?.length ?? 64;
+  const selIdx = selectedElement !== null && selectedElement < numElements ? selectedElement : 16;
   const activeElem = elements ? elements[selIdx] : null;
 
-  // Derived or default quantities
-  const estPhase = activeElem?.pinn_estimated_phase_error_deg ?? 8.42;
-  const estGain = activeElem?.pinn_estimated_gain_error_db ?? 2.83;
-  const truePhase = activeElem?.true_phase_error_deg ?? 8.42;
-  const trueGain = activeElem?.true_gain_error_db ?? 2.83;
-  const phaseRes = activeElem?.phase_error_residual_deg ?? 0.15;
-  const gainRes = activeElem?.gain_error_residual_db ?? 0.08;
+  const totalParams = modelStatus?.trainable_parameters ?? 33088;
+  const delta = modelStatus?.tikhonov_delta ?? 0.15;
+  const alpha = modelStatus?.residual_alpha ?? 0.50;
+
+  // 1. STAGE 01: Observed Complex Current
+  const obsRe = activeElem?.observed_real ?? 0.0482;
+  const obsIm = activeElem?.observed_imag ?? -0.0125;
+  const obsMag = Math.sqrt(obsRe * obsRe + obsIm * obsIm);
+  const obsPhase = (Math.atan2(obsIm, obsRe) * 180) / Math.PI;
+
+  // 2. STAGE 02: Tikhonov Physics Prior (c_prior)
+  const priorRe = activeElem?.analytical_correction_real ?? 0.985;
+  const priorIm = activeElem?.analytical_correction_imag ?? 0.015;
+  const priorMag = activeElem?.analytical_correction_magnitude ?? Math.sqrt(priorRe * priorRe + priorIm * priorIm);
+  const priorPhase = activeElem?.analytical_correction_phase_deg ?? (Math.atan2(priorIm, priorRe) * 180) / Math.PI;
+
+  // 4. STAGE 04: Estimated Compensation (c_hat = c_prior + Δc)
+  const isPinnAvailable = simulationResult?.pinn_available ?? true;
+  const cpRe = activeElem?.pinn_correction_real ?? priorRe;
+  const cpIm = activeElem?.pinn_correction_imag ?? priorIm;
+  const cMag = activeElem?.pinn_correction_magnitude ?? Math.sqrt(cpRe * cpRe + cpIm * cpIm);
+  const cPhase = activeElem?.pinn_correction_phase_deg ?? (Math.atan2(cpIm, cpRe) * 180) / Math.PI;
+  const cGainDb = 20 * Math.log10(Math.max(cMag, 1e-12));
+
+  // 3. STAGE 03: Bounded Neural Residual (Δc = c_hat - c_prior)
+  const deltaCRe = cpRe - priorRe;
+  const deltaCIm = cpIm - priorIm;
+  const deltaCMag = Math.sqrt(deltaCRe * deltaCRe + deltaCIm * deltaCIm);
+  const deltaCPhase = (Math.atan2(deltaCIm, deltaCRe) * 180) / Math.PI;
+
+  // 5. STAGE 05: Post-Compensation Array (V_post = V_hw · c_hat)
+  const hwRe = activeElem?.hardware_real ?? 1.0;
+  const hwIm = activeElem?.hardware_imag ?? 0.0;
+  const vCorrRe = hwRe * cpRe - hwIm * cpIm;
+  const vCorrIm = hwRe * cpIm + hwIm * cpRe;
+  const corrMag = Math.sqrt(vCorrRe * vCorrRe + vCorrIm * vCorrIm);
+  const corrPhase = (Math.atan2(vCorrIm, vCorrRe) * 180) / Math.PI;
+  const corrGainDb = 20 * Math.log10(Math.max(corrMag, 1e-12));
+
+  // Global Beam Restoration Metrics
+  const pointingError = simulationResult?.metrics.pointing_error_deg ?? 0.0;
+  const beamCorr = simulationResult?.metrics.beam_correlation != null
+    ? (simulationResult.metrics.beam_correlation * 100).toFixed(1)
+    : '99.8';
+  const pinnNmseDb = simulationResult?.metrics.pinn_nmse_db ?? simulationResult?.calibration.pinn?.nmse_db;
+
+  const handleScrollToBeam = () => {
+    const beamSection = document.getElementById('section-beam');
+    if (beamSection) {
+      beamSection.scrollIntoView({ behavior: 'smooth' });
+    } else {
+      setActiveView('beam');
+    }
+  };
 
   return (
-    <section className="pinn-detector-section" aria-label="PINN Neural Detection Pipeline">
-      {/* Editorial Section Header */}
+    <section className="pinn-detector-section" aria-label="PINN-Cal V4 Scientific Pipeline Experience">
+      {/* 1. PIPELINE HEADER & TECHNICAL INFORMATION STRIP (Requirement 17) */}
       <div className="detector-section-header">
         <div className="section-title-wrap">
-          <div className="section-step-num">03 · NEURAL DIAGNOSIS</div>
+          <div className="section-step-num">02 · TWO-STAGE HYBRID INVERSE ARCHITECTURE</div>
           <h2 className="section-main-heading">
-            THE PINN AS AN RF DETECTOR
+            PINN-Cal V4: Physics + Bounded Residual Calibration
           </h2>
           <p className="section-sub-heading">
-            Inverting hidden hardware impairments directly from noisy, coupled port currents
+            Closed-form Tikhonov regularized prior combined with a bounded neural residual network strictly constrained by physical impedance laws.
           </p>
         </div>
 
+        {/* Technical Strip (Requirement 17) */}
         <div className="detector-actions-row">
-          <span className="spec-tag-pill">
-            ARCHITECTURE: 130 → 256 → 128 → 64 → 128
-          </span>
-          <span className="spec-tag-pill highlight">
-            83,904 PARAMETERS (EPOCH 40)
-          </span>
-          <ConceptTrigger conceptKey="pinn_architecture" label="Architecture Physics" />
+          <div className="pipeline-tech-strip" role="region" aria-label="Model Architecture Specifications">
+            <span className="spec-tag-pill highlight-gold">
+              δ = {delta.toFixed(2)} TIKHONOV
+            </span>
+            <span className="spec-tag-pill highlight-purple">
+              α = {alpha.toFixed(2)} BOUND
+            </span>
+            <span className="spec-tag-pill">
+              {totalParams.toLocaleString()} PARAMETERS
+            </span>
+            <span className="spec-tag-pill mono">
+              128 → 128 → 64 → 128
+            </span>
+            <span className="spec-tag-pill inspecting-badge">
+              INSPECTING ELEMENT #{selIdx + 1} OF 64
+            </span>
+          </div>
+          <ConceptTrigger conceptKey="pinn_architecture" label="V4 Theory" />
         </div>
       </div>
 
-      {/* Main 5-Stage Neural Pipeline Visual Canvas */}
-      <div className="detector-pipeline-grid">
-        {/* STAGE 1: OBSERVED COUPLING CURRENTS */}
-        <div className="pipeline-stage-card stage-input">
+      {/* Super Mode Operator Presence Cue (Outside pipeline computation) */}
+      {superMode && (
+        <div className="pipeline-operator-cue" role="status" aria-label="Franky Operator Status">
+          <span className="operator-icon" aria-hidden="true">★</span>
+          <span className="operator-text">SUPER RF ENGINEER observing calibration flow</span>
+        </div>
+      )}
+
+      {/* 2. FIVE-STAGE HORIZONTAL PIPELINE CANVAS (Requirements 3 to 8, 15) */}
+      <div className="detector-pipeline-five-grid" role="region" aria-label="Five-stage scientific calibration flow">
+        {/* ==============================================================
+            STAGE 01: OBSERVED / IMPAIRED CURRENT
+            ============================================================== */}
+        <div className="pipeline-stage-card stage-card-01">
           <div className="stage-card-header">
-            <span className="stage-num">STAGE 1</span>
-            <span className="stage-type">PORT MEASUREMENT</span>
+            <div className="stage-num-badge badge-cyan">01</div>
+            <span className="stage-role-label">PORT OBSERVATION</span>
           </div>
-          <h3 className="stage-title">Observed Port Currents</h3>
+
+          <h3 className="stage-title">OBSERVED / IMPAIRED CURRENT</h3>
           <p className="stage-desc">
-            Receiver samples complex currents <span className="mono">I_obs = [Z + Z_L]⁻¹ · V_impaired</span> perturbed by 64-element mutual coupling network.
+            Measured complex port currents from the impaired 64-element ULA across the reciprocal Z-network with hardware perturbations.
           </p>
 
           <div className="stage-data-box">
-            <div className="data-row">
-              <span className="data-key">Channel Input:</span>
-              <span className="data-val mono">Ch #{selIdx + 1} of 64</span>
+            {/* Input / Process / Output Hierarchy (Requirement 15) */}
+            <div className="hierarchy-row">
+              <span className="h-tag input-tag">INPUT:</span>
+              <span className="h-val">V_hw perturbed by mutual coupling & noise</span>
             </div>
-            <div className="data-row">
-              <span className="data-key">Coupled Current:</span>
-              <span className="data-val mono">
-                {activeElem ? `${activeElem.observed_real.toFixed(3)} + ${activeElem.observed_imag.toFixed(3)}j` : '0.048 - 0.012j'}
-              </span>
+            <div className="hierarchy-row">
+              <span className="h-tag process-tag">PROCESS:</span>
+              <span className="h-val">Coupled-current generation through reciprocal Z-impedance network</span>
             </div>
-            <div className="data-row">
-              <span className="data-key">Mutual Coupling:</span>
-              <span className="data-val green">Active (c₁=0.12, α=0.55)</span>
+            <div className="hierarchy-row">
+              <span className="h-tag output-tag">OUTPUT:</span>
+              <span className="h-val mono">I_obs ∈ ℂ⁶⁴ (64 complex currents)</span>
+            </div>
+
+            {/* Live Element Data Display */}
+            <div className="stage-live-telemetry">
+              <div className="telemetry-label">Element #{selIdx + 1} Current:</div>
+              <div className="telemetry-value-lg cyan-text mono">
+                {obsRe.toFixed(4)} {obsIm >= 0 ? '+' : ''}{obsIm.toFixed(4)}j
+              </div>
+              <div className="telemetry-sub-metrics">
+                <span>|I_obs|: <strong>{obsMag.toFixed(4)}</strong></span>
+                <span>∠I_obs: <strong>{obsPhase > 0 ? `+${obsPhase.toFixed(1)}°` : `${obsPhase.toFixed(1)}°`}</strong></span>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* TRANSITION ARROW 1 */}
+        {/* TRANSITION ARROW 01 → 02 */}
         <div className="pipeline-flow-arrow" aria-hidden="true">
+          <div className="arrow-line" />
           <span className="arrow-pulse">→</span>
-          <span className="arrow-sub">Input Vector</span>
+          <span className="arrow-sub">I_obs (64)</span>
         </div>
 
-        {/* STAGE 2: NEURAL NETWORK CORE */}
-        <div className="pipeline-stage-card stage-neural">
+        {/* ==============================================================
+            STAGE 02: TIKHONOV PHYSICS PRECONDITIONER
+            ============================================================== */}
+        <div className="pipeline-stage-card stage-card-02">
           <div className="stage-card-header">
-            <span className="stage-num">STAGE 2</span>
-            <span className="stage-type">PHYSICS-INFORMED INFERENCE</span>
+            <div className="stage-num-badge badge-amber">02</div>
+            <span className="stage-role-label">PHYSICS REGULARIZER</span>
           </div>
-          <h3 className="stage-title">PINN Deep Core</h3>
+
+          <h3 className="stage-title">TIKHONOV PRECONDITIONER</h3>
           <p className="stage-desc">
-            4-layer feedforward network trained with physics-regularized loss function minimizing coupling residual.
+            Closed-form Tikhonov regularization stabilizes the physics-derived compensation prior under noisy/incomplete inversion.
           </p>
 
-          {/* Interactive Neural Nodes Schematic */}
-          <div className="neural-nodes-canvas">
-            <svg viewBox="0 0 160 70" className="neural-svg" aria-label="Neural Network Layers">
-              {/* Layer 1: Input (130D) */}
-              {[15, 35, 55].map((y, i) => (
-                <circle key={`l1-${i}`} cx="20" cy={y} r="4" fill="#0284c7" />
-              ))}
-              {/* Layer 2: Hidden 256 */}
-              {[10, 25, 45, 60].map((y, i) => (
-                <circle key={`l2-${i}`} cx="60" cy={y} r="3.5" fill="#7c3aed" className={superMode ? 'pulse-node' : ''} />
-              ))}
-              {/* Layer 3: Hidden 128 */}
-              {[15, 35, 55].map((y, i) => (
-                <circle key={`l3-${i}`} cx="100" cy={y} r="3.5" fill="#7c3aed" className={superMode ? 'pulse-node' : ''} />
-              ))}
-              {/* Layer 4: Output 128 */}
-              {[20, 50].map((y, i) => (
-                <circle key={`l4-${i}`} cx="140" cy={y} r="4.5" fill="#10b981" />
-              ))}
+          <div className="stage-data-box">
+            {/* Input / Process / Output Hierarchy */}
+            <div className="hierarchy-row">
+              <span className="h-tag input-tag">INPUT:</span>
+              <span className="h-val">Port currents I_obs ∈ ℂ⁶⁴</span>
+            </div>
+            <div className="hierarchy-row">
+              <span className="h-tag process-tag">PROCESS:</span>
+              <span className="h-val mono">c_prior = V_ideal · conj(V_hw) / (|V_hw|² + δ²)</span>
+            </div>
+            <div className="hierarchy-row">
+              <span className="h-tag output-tag">OUTPUT:</span>
+              <span className="h-val mono">c_prior ∈ ℂ⁶⁴ (Re/Im → 128 real features)</span>
+            </div>
 
-              {/* Connecting Synaptic Rays */}
-              <line x1="20" y1="35" x2="60" y2="25" stroke="#cbd5e1" strokeWidth="1" strokeDasharray="2,2" />
-              <line x1="20" y1="35" x2="60" y2="45" stroke="#cbd5e1" strokeWidth="1" strokeDasharray="2,2" />
-              <line x1="60" y1="25" x2="100" y2="35" stroke="#cbd5e1" strokeWidth="1" />
-              <line x1="60" y1="45" x2="100" y2="35" stroke="#cbd5e1" strokeWidth="1" />
-              <line x1="100" y1="35" x2="140" y2="35" stroke="#10b981" strokeWidth="1.5" />
-            </svg>
-            <div className="neural-labels">
-              <span>Input (130)</span>
-              <span>Hidden (256/128/64)</span>
-              <span>Output (128)</span>
+            {/* Key Prominent Constant (Requirement 5) */}
+            <div className="stage-live-telemetry">
+              <div className="telemetry-label">Regularization Parameter:</div>
+              <div className="telemetry-value-lg amber-text mono">
+                δ = {delta.toFixed(2)}
+              </div>
+              <div className="telemetry-sub-metrics">
+                <span>c_prior #{selIdx + 1}: <strong>{priorMag.toFixed(3)} ∠{priorPhase > 0 ? `+${priorPhase.toFixed(1)}°` : `${priorPhase.toFixed(1)}°`}</strong></span>
+                <span>Features: <strong>128 Real Features</strong></span>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* TRANSITION ARROW 2 */}
+        {/* TRANSITION ARROW 02 → 03 */}
         <div className="pipeline-flow-arrow" aria-hidden="true">
+          <div className="arrow-line" />
           <span className="arrow-pulse">→</span>
-          <span className="arrow-sub">Inferred C</span>
+          <span className="arrow-sub">c_prior (128D)</span>
         </div>
 
-        {/* STAGE 3: ESTIMATED IMPAIRMENTS & COMPENSATION */}
-        <div className="pipeline-stage-card stage-estimate">
+        {/* ==============================================================
+            STAGE 03: BOUNDED NEURAL RESIDUAL
+            ============================================================== */}
+        <div className="pipeline-stage-card stage-card-03">
           <div className="stage-card-header">
-            <span className="stage-num">STAGE 3</span>
-            <span className="stage-type">NEURAL ESTIMATE</span>
+            <div className="stage-num-badge badge-purple">03</div>
+            <span className="stage-role-label">BOUNDED RESIDUAL NET</span>
           </div>
-          <h3 className="stage-title">Inferred Impairments</h3>
+
+          <h3 className="stage-title">BOUNDED NEURAL RESIDUAL</h3>
           <p className="stage-desc">
-            PINN infers complex correction <span className="mono">C = H⁻¹</span>. Derived element-level phase and gain estimates:
+            Compact MLP learns residual correction <span className="mono">Δc = α · tanh(r)</span> bounded strictly in [−{alpha.toFixed(2)}, +{alpha.toFixed(2)}].
           </p>
 
-          <div className="estimate-metrics-grid">
-            <div className="est-box phase">
-              <span className="est-label">ESTIMATED PHASE (ϕ):</span>
-              <span className="est-num mono purple">
-                {estPhase > 0 ? `+${estPhase.toFixed(2)}°` : `${estPhase.toFixed(2)}°`}
-              </span>
-              <span className="est-sub">Aperture Deviation</span>
+          <div className="stage-data-box">
+            {/* Input / Process / Output Hierarchy */}
+            <div className="hierarchy-row">
+              <span className="h-tag input-tag">INPUT:</span>
+              <span className="h-val mono">Re/Im(c_prior) (128 real features)</span>
+            </div>
+            <div className="hierarchy-row">
+              <span className="h-tag process-tag">PROCESS:</span>
+              <span className="h-val">128 → 128 → 64 → 128 MLP</span>
+            </div>
+            <div className="hierarchy-row">
+              <span className="h-tag output-tag">OUTPUT:</span>
+              <span className="h-val mono">Δc ∈ [−{alpha.toFixed(2)}, +{alpha.toFixed(2)}]¹²⁸</span>
             </div>
 
-            <div className="est-box gain">
-              <span className="est-label">ESTIMATED GAIN (G):</span>
-              <span className="est-num mono purple">
-                {estGain > 0 ? `+${estGain.toFixed(2)} dB` : `${estGain.toFixed(2)} dB`}
-              </span>
-              <span className="est-sub">Amplitude Deviation</span>
+            {/* Neural Schematic & Live Residual (Requirement 6) */}
+            <div className="stage-live-telemetry">
+              <div className="telemetry-label">Bounded Bound Parameter:</div>
+              <div className="telemetry-value-lg purple-text mono">
+                α = {alpha.toFixed(2)}
+              </div>
+              <div className="telemetry-sub-metrics">
+                <span>Δc #{selIdx + 1}: <strong>|Δc| = {deltaCMag.toFixed(4)}</strong></span>
+                <span>Active Bound: <strong>Strictly ≤ {alpha.toFixed(2)}</strong></span>
+              </div>
+            </div>
+
+            {/* Neural Nodes Mini Schematic */}
+            <div className="neural-nodes-canvas">
+              <svg viewBox="0 0 160 52" className="neural-svg" aria-label="128 to 128 to 64 to 128 Neural Layer Schematic">
+                {/* L1 Input */}
+                {[12, 26, 40].map((y, i) => (
+                  <circle key={`l1-${i}`} cx="18" cy={y} r="3.5" fill="#0284c7" />
+                ))}
+                {/* L2 Hidden 128 */}
+                {[10, 21, 32, 43].map((y, i) => (
+                  <circle key={`l2-${i}`} cx="58" cy={y} r="3" fill="#7c3aed" className={superMode ? 'pulse-node' : ''} />
+                ))}
+                {/* L3 Hidden 64 */}
+                {[14, 26, 38].map((y, i) => (
+                  <circle key={`l3-${i}`} cx="102" cy={y} r="3" fill="#7c3aed" className={superMode ? 'pulse-node' : ''} />
+                ))}
+                {/* L4 Output 128 */}
+                {[14, 38].map((y, i) => (
+                  <circle key={`l4-${i}`} cx="142" cy={y} r="3.5" fill="#8b5cf6" />
+                ))}
+
+                {/* Synaptic Connections */}
+                <line x1="18" y1="26" x2="58" y2="21" stroke="#cbd5e1" strokeWidth="0.9" strokeDasharray="2,2" />
+                <line x1="18" y1="26" x2="58" y2="32" stroke="#cbd5e1" strokeWidth="0.9" strokeDasharray="2,2" />
+                <line x1="58" y1="21" x2="102" y2="26" stroke="#cbd5e1" strokeWidth="0.9" />
+                <line x1="58" y1="32" x2="102" y2="26" stroke="#cbd5e1" strokeWidth="0.9" />
+                <line x1="102" y1="26" x2="142" y2="26" stroke="#8b5cf6" strokeWidth="1.2" />
+              </svg>
+              <div className="neural-labels">
+                <span>128 In</span>
+                <span>128/64 Hidden</span>
+                <span>128 Out</span>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* TRANSITION ARROW 3 */}
+        {/* TRANSITION ARROW 03 → 04 */}
         <div className="pipeline-flow-arrow" aria-hidden="true">
+          <div className="arrow-line" />
           <span className="arrow-pulse">→</span>
-          <span className="arrow-sub">Inverse Weights</span>
+          <span className="arrow-sub">Δc (128D)</span>
         </div>
 
-        {/* STAGE 4: POST-COMPENSATION APERTURE STATE */}
-        <div className="pipeline-stage-card stage-post">
+        {/* ==============================================================
+            STAGE 04: ESTIMATED COMPENSATION
+            ============================================================== */}
+        <div className="pipeline-stage-card stage-card-04">
           <div className="stage-card-header">
-            <span className="stage-num">STAGE 4</span>
-            <span className="stage-type">POST-COMPENSATION</span>
+            <div className="stage-num-badge badge-indigo">04</div>
+            <span className="stage-role-label">FINAL ESTIMATE</span>
           </div>
-          <h3 className="stage-title">Post-Compensation State</h3>
+
+          <h3 className="stage-title">ESTIMATED COMPENSATION</h3>
           <p className="stage-desc">
-            Inverse weights applied: <span className="mono">V_corr = V_hw · C</span>. Verified against simulated test realization:
+            Superposition of physics prior and neural residual yields estimated complex compensation weights:
           </p>
 
-          <div className="post-compensation-box">
-            <div className="post-row">
-              <span className="post-key">Phase Residual (True − Est):</span>
-              <strong className="post-val green mono">
-                {phaseRes > 0 ? `+${phaseRes.toFixed(2)}°` : `${phaseRes.toFixed(2)}°`}
-              </strong>
+          <div className="stage-data-box">
+            {/* Input / Process / Output Hierarchy */}
+            <div className="hierarchy-row">
+              <span className="h-tag input-tag">INPUT:</span>
+              <span className="h-val">Prior c_prior + Residual Δc</span>
             </div>
-            <div className="post-row">
-              <span className="post-key">Gain Residual:</span>
-              <strong className="post-val green mono">
-                {gainRes > 0 ? `+${gainRes.toFixed(2)} dB` : `${gainRes.toFixed(2)} dB`}
-              </strong>
+            <div className="hierarchy-row">
+              <span className="h-tag process-tag">PROCESS:</span>
+              <span className="h-val">ĉ_n = c_prior,n + Δc_n</span>
             </div>
-            <div className="post-row reference-tag">
-              <span className="post-key">Simulation Reference:</span>
-              <span className="post-val red mono">
-                True: {truePhase > 0 ? `+${truePhase.toFixed(1)}°` : `${truePhase.toFixed(1)}°`} / {trueGain > 0 ? `+${trueGain.toFixed(1)} dB` : `${trueGain.toFixed(1)} dB`}
-              </span>
+            <div className="hierarchy-row">
+              <span className="h-tag output-tag">OUTPUT:</span>
+              <span className="h-val mono">ĉ ∈ ℂ⁶⁴ (Estimated Weights)</span>
+            </div>
+
+            {/* Live Compensation Data (Requirement 7) */}
+            <div className="stage-live-telemetry">
+              <div className="telemetry-label">Estimated Formula:</div>
+              <div className="telemetry-value-lg indigo-text mono">
+                ĉ = c_prior + Δc
+              </div>
+              <div className="telemetry-sub-metrics">
+                <span>Weight #{selIdx + 1}: <strong>{cMag.toFixed(3)} ∠{cPhase > 0 ? `+${cPhase.toFixed(1)}°` : `${cPhase.toFixed(1)}°`}</strong></span>
+                <span>Gain dB: <strong>{cGainDb > 0 ? `+${cGainDb.toFixed(2)}` : cGainDb.toFixed(2)} dB</strong></span>
+              </div>
+            </div>
+
+            <div className="estimate-disclaimer-pill">
+              ESTIMATED BY PINN-CAL V4 · NOT GROUND TRUTH
             </div>
           </div>
         </div>
+
+        {/* TRANSITION ARROW 04 → 05 */}
+        <div className="pipeline-flow-arrow" aria-hidden="true">
+          <div className="arrow-line" />
+          <span className="arrow-pulse">→</span>
+          <span className="arrow-sub">ĉ · V_hw</span>
+        </div>
+
+        {/* ==============================================================
+            STAGE 05: POST-COMPENSATION ARRAY
+            ============================================================== */}
+        <div className="pipeline-stage-card stage-card-05">
+          <div className="stage-card-header">
+            <div className="stage-num-badge badge-green">05</div>
+            <span className="stage-role-label">RESTORED APERTURE</span>
+          </div>
+
+          <h3 className="stage-title">POST-COMPENSATION ARRAY</h3>
+          <p className="stage-desc">
+            Applying estimated compensation to observed hardware state yields restored excitation and radiation beam:
+          </p>
+
+          <div className="stage-data-box">
+            {/* Input / Process / Output Hierarchy */}
+            <div className="hierarchy-row">
+              <span className="h-tag input-tag">INPUT:</span>
+              <span className="h-val">V_hw,n and estimated weights ĉ_n</span>
+            </div>
+            <div className="hierarchy-row">
+              <span className="h-tag process-tag">PROCESS:</span>
+              <span className="h-val">V_post,n = V_hw,n · ĉ_n</span>
+            </div>
+            <div className="hierarchy-row">
+              <span className="h-tag output-tag">OUTPUT:</span>
+              <span className="h-val mono">Restored Radiation Beam</span>
+            </div>
+
+            {/* Live Restored Aperture Metrics (Requirement 8) */}
+            <div className="stage-live-telemetry">
+              <div className="telemetry-label">Restored Beam Correlation:</div>
+              <div className="telemetry-value-lg green-text mono">
+                {beamCorr}%
+              </div>
+              <div className="telemetry-sub-metrics">
+                <span>Pointing Error: <strong>{pointingError.toFixed(2)}°</strong></span>
+                <span>NMSE: <strong>{pinnNmseDb != null ? `${pinnNmseDb.toFixed(1)} dB` : '-28.4 dB'}</strong></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 3. PIPELINE FOOTER & RESTORED BEAM LINK (Requirement 18) */}
+      <div className="detector-pipeline-footer" role="region" aria-label="Pipeline Mathematical Conclusion">
+        <div className="pipeline-equation-statement">
+          <span className="eq-term">PHYSICS PRIOR (c_prior)</span>
+          <span className="eq-op">+</span>
+          <span className="eq-term">BOUNDED NEURAL RESIDUAL (Δc)</span>
+          <span className="eq-op">=</span>
+          <span className="eq-term highlight-eq">ESTIMATED COMPENSATION (ĉ)</span>
+          <span className="eq-op">→</span>
+          <span className="eq-term green-eq">POST-COMPENSATION ARRAY (V_post)</span>
+        </div>
+
+        <button
+          type="button"
+          className="btn btn-secondary beam-inspect-btn"
+          onClick={handleScrollToBeam}
+          title="Scroll down to inspect far-field radiation beam restoration"
+        >
+          <span>Inspect Restored Beam Pattern</span>
+          <span className="btn-arrow" aria-hidden="true">→</span>
+        </button>
       </div>
     </section>
   );

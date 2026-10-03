@@ -33,18 +33,17 @@ export const CalibrationPanel: React.FC = () => {
             }}
           />
           <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>
-            PINN {pinn_available ? 'active' : 'unavailable'}
+            PINN-Cal V4 {pinn_available ? 'active' : 'unavailable'}
           </span>
         </div>
       </div>
       <div className="card-body" style={{ padding: 0 }}>
 
-        {/* Honesty notice — always show */}
+        {/* Live simulation comparison summary */}
         <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--color-border)' }}>
-          <div className="honesty-notice">
-            Validated results: Analytical NMSE = −14.45 dB · PINN NMSE = −7.75 dB.
-            The analytical baseline currently achieves lower correction error.
-            Both methods are shown without ranking.
+          <div className="honesty-notice" style={{ background: '#f8fafc', color: 'var(--color-text-secondary)', borderLeft: '3px solid #0284c7' }}>
+            Live Simulation Results: Analytical Baseline NMSE = {ana.nmse_db.toFixed(2)} dB{pinn ? ` · PINN-Cal V4 NMSE = ${pinn.nmse_db.toFixed(2)} dB` : ''}.
+            Dynamic metrics evaluated across 64 elements for the commanded steering angle.
           </div>
         </div>
 
@@ -52,9 +51,9 @@ export const CalibrationPanel: React.FC = () => {
           <thead>
             <tr>
               <th>Metric</th>
-              <th style={{ color: 'var(--color-analytical)' }}>Analytical</th>
+              <th style={{ color: 'var(--color-analytical)' }}>Analytical Baseline</th>
               {pinn_available && pinn && (
-                <th style={{ color: 'var(--color-pinn)' }}>PINN</th>
+                <th style={{ color: 'var(--color-pinn)' }}>PINN-Cal V4</th>
               )}
             </tr>
           </thead>

@@ -4,44 +4,68 @@ import { useAppStore } from '../store/appStore';
 import type { SweepType, RobustnessPoint } from '../types/api';
 import { ConceptTrigger } from '../components/common/ConceptExplainer';
 
-const SWEEP_OPTIONS: { value: SweepType; label: string; unit: string; description: string }[] = [
+const SWEEP_OPTIONS: {
+  value: SweepType;
+  label: string;
+  unit: string;
+  name: string;
+  levels: number[];
+  description: string;
+  category: string;
+}[] = [
   {
     value: 'snr',
-    label: '1. Signal-to-Noise Ratio (SNR) Sweep',
+    name: 'Signal-to-Noise Ratio (SNR) Sweep',
+    label: 'SNR Sweep (40 dB → 10 dB)',
     unit: 'dB',
-    description: 'Evaluates calibration resilience as receiver thermal noise increases from 40 dB down to 10 dB.',
+    levels: [40, 30, 20, 15, 10],
+    description:
+      'Evaluates calibration resilience as receiver thermal noise increases from pristine laboratory conditions (40 dB) down to severe noise (10 dB).',
+    category: 'NOISE STRESS',
   },
   {
     value: 'coupling',
-    label: '2. Coupling Uncertainty (ΔZ) Sweep',
+    name: 'Coupling Uncertainty (ΔZ) Sweep',
+    label: 'Coupling Mismatch Sweep (0% → 50%)',
     unit: 'fraction',
-    description: 'Tests tolerance to hidden mutual impedance variations from 0% up to 50% mismatch.',
+    levels: [0, 0.1, 0.2, 0.3, 0.5],
+    description:
+      'Tests tolerance to hidden mutual impedance variations from nominal model Z across 0% to 50% mismatch.',
+    category: 'COUPLING STRESS',
   },
   {
     value: 'steering',
-    label: '3. Steering Sector Sweep',
+    name: 'Steering Sector Scan Sweep',
+    label: 'Steering Sector Sweep (-50° → +50°)',
     unit: '°',
-    description: 'Measures angular consistency across wide scan angles (-50° to +50°).',
+    levels: [-50, -30, -10, 10, 30, 50],
+    description:
+      'Measures angular consistency and aperture calibration accuracy across wide scan sectors from -50° to +50°.',
+    category: 'GEOMETRY STRESS',
   },
 ];
 
 const NUM_SAMPLES_OPTIONS = [20, 50, 100, 200];
 
 export const RobustnessLab: React.FC = () => {
-  const { robustnessResult, robustnessState, robustnessError, runRobustness } = useAppStore();
+  const { robustnessResult, robustnessState, robustnessError, runRobustness, theme, superMode } = useAppStore();
   const [sweepType, setSweepType] = useState<SweepType>('snr');
   const [numSamples, setNumSamples] = useState(50);
   const [seed, setSeed] = useState(4200);
 
   const isComputing = robustnessState === 'computing';
+  const hasResult = !!robustnessResult && robustnessState === 'success';
+  const hasError = robustnessState === 'error' || !!robustnessError;
+  const isDark = theme === 'dark';
 
   const handleRun = () => {
     runRobustness({ sweep_type: sweepType, num_samples: numSamples, seed });
   };
 
-  const result = robustnessResult;
   const currentSweepMeta = SWEEP_OPTIONS.find((o) => o.value === sweepType) ?? SWEEP_OPTIONS[0];
+  const result = robustnessResult;
 
+  // Primary Chart: NMSE vs Parameter
   const anaNmseTrace = result
     ? {
         x: result.points.map((p: RobustnessPoint) => p.level),
@@ -49,9 +73,9 @@ export const RobustnessLab: React.FC = () => {
         type: 'scatter' as const,
         mode: 'lines+markers' as const,
         name: 'Analytical Baseline',
-        line: { color: '#0891b2', width: 2.2 },
-        marker: { size: 6, color: '#0891b2' },
-        hovertemplate: `Analytical<br>${currentSweepMeta.unit}: %{x}<br>NMSE: %{y:.2f} dB<extra></extra>`,
+        line: { color: '#0891b2', width: 2.5 },
+        marker: { size: 7, color: '#0891b2' },
+        hovertemplate: `<b>Analytical Baseline</b><br>${currentSweepMeta.name}: %{x} ${currentSweepMeta.unit}<br>NMSE: %{y:.2f} dB<extra></extra>`,
       }
     : null;
 
@@ -62,23 +86,24 @@ export const RobustnessLab: React.FC = () => {
           y: result.points.map((p: RobustnessPoint) => p.pinn_nmse_db ?? null),
           type: 'scatter' as const,
           mode: 'lines+markers' as const,
-          name: 'PINN Model',
-          line: { color: '#7c3aed', width: 2.2 },
-          marker: { size: 6, color: '#7c3aed' },
-          hovertemplate: `PINN<br>${currentSweepMeta.unit}: %{x}<br>NMSE: %{y:.2f} dB<extra></extra>`,
+          name: 'PINN-Cal V4',
+          line: { color: '#ea580c', width: 2.8 },
+          marker: { size: 7, color: '#ea580c' },
+          hovertemplate: `<b>PINN-Cal V4</b><br>${currentSweepMeta.name}: %{x} ${currentSweepMeta.unit}<br>NMSE: %{y:.2f} dB<extra></extra>`,
         }
       : null;
 
+  // Secondary Chart: Phase Error vs Parameter
   const phaseAnaTrace = result
     ? {
         x: result.points.map((p: RobustnessPoint) => p.level),
         y: result.points.map((p: RobustnessPoint) => p.analytical_phase_error_deg),
         type: 'scatter' as const,
         mode: 'lines+markers' as const,
-        name: 'Analytical Phase Error',
-        line: { color: '#0891b2', width: 2 },
-        marker: { size: 6 },
-        hovertemplate: `Analytical: %{y:.2f}°<extra></extra>`,
+        name: 'Analytical Baseline',
+        line: { color: '#0891b2', width: 2.2 },
+        marker: { size: 6, color: '#0891b2' },
+        hovertemplate: `<b>Analytical Baseline</b><br>${currentSweepMeta.name}: %{x} ${currentSweepMeta.unit}<br>Phase Error: %{y:.2f}°<extra></extra>`,
       }
     : null;
 
@@ -89,85 +114,94 @@ export const RobustnessLab: React.FC = () => {
           y: result.points.map((p: RobustnessPoint) => p.pinn_phase_error_deg ?? null),
           type: 'scatter' as const,
           mode: 'lines+markers' as const,
-          name: 'PINN Phase Error',
-          line: { color: '#7c3aed', width: 2 },
-          marker: { size: 6 },
-          hovertemplate: `PINN: %{y:.2f}°<extra></extra>`,
+          name: 'PINN-Cal V4',
+          line: { color: '#ea580c', width: 2.4 },
+          marker: { size: 6, color: '#ea580c' },
+          hovertemplate: `<b>PINN-Cal V4</b><br>${currentSweepMeta.name}: %{x} ${currentSweepMeta.unit}<br>Phase Error: %{y:.2f}°<extra></extra>`,
         }
       : null;
 
   const plotLayout = (yTitle: string) => ({
-    margin: { t: 20, r: 16, b: 40, l: 50 },
+    margin: { t: 25, r: 20, b: 45, l: 55 },
     paper_bgcolor: 'transparent',
     plot_bgcolor: 'transparent',
-    font: { family: "'Inter', sans-serif", size: 10, color: '#475569' },
+    font: {
+      family: "'Inter', sans-serif",
+      size: 11,
+      color: isDark ? '#94a3b8' : '#475569',
+    },
     legend: {
       orientation: 'h' as const,
       x: 0,
       y: 1.15,
-      bgcolor: 'rgba(255,255,255,0.85)',
-      font: { size: 10 },
+      bgcolor: isDark ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.92)',
+      bordercolor: isDark ? '#334155' : '#e2e8f0',
+      borderwidth: 1,
+      font: { size: 10.5 },
     },
     xaxis: {
-      title: { text: `${currentSweepMeta.label.split('.')[1]} (${currentSweepMeta.unit})`, font: { size: 10 } },
-      gridcolor: '#e2e8f0',
-      tickfont: { size: 9 },
+      title: { text: `${currentSweepMeta.name} (${currentSweepMeta.unit})`, font: { size: 11 } },
+      gridcolor: isDark ? '#1e293b' : '#e2e8f0',
+      zerolinecolor: isDark ? '#334155' : '#cbd5e1',
+      tickfont: { size: 10 },
+      autorange: sweepType === 'snr' ? ('reversed' as const) : true,
     },
     yaxis: {
-      title: { text: yTitle, font: { size: 10 } },
-      gridcolor: '#e2e8f0',
-      tickfont: { size: 9 },
+      title: { text: yTitle, font: { size: 11 } },
+      gridcolor: isDark ? '#1e293b' : '#e2e8f0',
+      zerolinecolor: isDark ? '#334155' : '#cbd5e1',
+      tickfont: { size: 10 },
     },
     hovermode: 'x unified' as const,
   });
 
   return (
-    <div className="robustness-lab-page" style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* Page Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10 }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <h2 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0, color: 'var(--color-text-primary)' }}>
-              ROBUSTNESS LAB — MONTE CARLO STRESS TEST
-            </h2>
-            <ConceptTrigger conceptKey="snr" label="Noise Model" />
+    <div className="robustness-lab-page">
+      {/* 3. PAGE HEADER */}
+      <header className="robustness-header-section">
+        <div className="robustness-title-row">
+          <div className="robustness-title-group">
+            <h1 className="robustness-page-title">ROBUSTNESS LAB</h1>
+            <p className="robustness-page-subtitle">
+              Stress-test PINN-Cal V4 under degraded noise, hardware impairment, and coupling mismatch conditions using fresh Monte Carlo realizations.
+            </p>
           </div>
-          <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', margin: '4px 0 0 0' }}>
-            Stress the calibration algorithms under degraded operating conditions with fresh backend Monte Carlo evaluations.
-          </p>
+          <div className="robustness-identity-strip">
+            <span className="strip-item">64 ELEMENTS</span>
+            <span className="strip-dot">·</span>
+            <span className="strip-item">28 GHz</span>
+            <span className="strip-dot">·</span>
+            <span className="strip-item">0.5 λ</span>
+            <span className="strip-dot">·</span>
+            <span className="strip-item highlight-orange">PINN-CAL V4</span>
+            <span className="strip-dot">·</span>
+            <span className="strip-item">δ = 0.15</span>
+            <span className="strip-dot">·</span>
+            <span className="strip-item">α = 0.50</span>
+          </div>
+        </div>
+      </header>
+
+      {/* 4. MONTE CARLO EXPERIMENT CONFIGURATION */}
+      <section className="card robustness-card robustness-config-card">
+        <div className="card-header robustness-card-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span className="header-icon orange-icon">🧪</span>
+            <h2 className="robustness-section-title">MONTE CARLO EXPERIMENT CONFIGURATION</h2>
+          </div>
+          <span className="header-meta">Fresh Evaluated Realizations per Condition Level</span>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span
-            style={{
-              padding: '3px 8px',
-              borderRadius: 4,
-              background: '#f1f5f9',
-              color: 'var(--color-text-secondary)',
-              fontSize: '0.6875rem',
-              fontWeight: 600,
-            }}
-          >
-            Live Monte Carlo Mode
-          </span>
-        </div>
-      </div>
-
-      {/* Control Console */}
-      <div className="card">
-        <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h4 style={{ margin: 0, fontSize: '0.875rem' }}>Experiment Configuration</h4>
-          <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-tertiary)' }}>
-            Fresh simulated realizations per level
-          </span>
-        </div>
-
-        <div className="card-body" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr auto', gap: 12, alignItems: 'flex-end' }}>
-            <div>
-              <label className="form-label">Sweep Parameter</label>
+        <div className="card-body robustness-config-body">
+          <div className="robustness-controls-grid">
+            {/* Control 1: Sweep Parameter */}
+            <div className="robustness-form-group">
+              <label className="robustness-form-label" htmlFor="ctrl-sweep-type">
+                SWEEP PARAMETER
+              </label>
               <select
-                className="form-select"
+                id="ctrl-sweep-type"
+                className="form-select robustness-select"
                 value={sweepType}
                 onChange={(e) => setSweepType(e.target.value as SweepType)}
                 disabled={isComputing}
@@ -178,148 +212,210 @@ export const RobustnessLab: React.FC = () => {
                   </option>
                 ))}
               </select>
+              <div className="robustness-form-hint">Operating stress condition domain</div>
             </div>
 
-            <div>
-              <label className="form-label">Samples / Level</label>
+            {/* Control 2: Samples per Level */}
+            <div className="robustness-form-group">
+              <label className="robustness-form-label" htmlFor="ctrl-num-samples">
+                SAMPLES / LEVEL
+              </label>
               <select
-                className="form-select"
+                id="ctrl-num-samples"
+                className="form-select robustness-select"
                 value={numSamples}
                 onChange={(e) => setNumSamples(Number(e.target.value))}
                 disabled={isComputing}
               >
                 {NUM_SAMPLES_OPTIONS.map((n) => (
                   <option key={n} value={n}>
-                    {n} realizations
+                    {n} realizations per level
                   </option>
                 ))}
               </select>
+              <div className="robustness-form-hint">Statistical sample depth per stress level</div>
             </div>
 
-            <div>
-              <label className="form-label">Random Seed</label>
+            {/* Control 3: Random Seed */}
+            <div className="robustness-form-group">
+              <label className="robustness-form-label" htmlFor="ctrl-seed">
+                RANDOM SEED
+              </label>
               <input
+                id="ctrl-seed"
                 type="number"
-                className="form-input"
+                className="form-input robustness-input"
                 value={seed}
                 onChange={(e) => setSeed(Number(e.target.value))}
                 disabled={isComputing}
+                min={0}
               />
+              <div className="robustness-form-hint">Monte Carlo noise seed base</div>
             </div>
 
-            <button
-              className="btn btn-primary"
-              onClick={handleRun}
-              disabled={isComputing}
-              style={{ minWidth: 160, height: 36 }}
-            >
-              {isComputing ? 'Computing Sweep…' : '▶ START EXPERIMENT'}
-            </button>
-          </div>
-
-          <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', background: '#f8fafc', padding: '10px 14px', borderRadius: 6, border: '1px solid #e2e8f0', lineHeight: 1.5 }}>
-            <strong>Active Stress Condition:</strong> {currentSweepMeta.description}
-          </div>
-        </div>
-      </div>
-
-      {robustnessError && (
-        <div style={{ padding: '10px 14px', background: '#fee2e2', border: '1px solid #fecaca', borderRadius: 6, color: '#991b1b', fontSize: '0.875rem' }}>
-          <strong>Experiment Error:</strong> {robustnessError}
-        </div>
-      )}
-
-      {/* Pre-Experiment Roadmap / What Are We Testing Card (Eliminates Empty Space) */}
-      {!result && !isComputing && (
-        <div className="card" style={{ padding: '20px 24px', background: '#ffffff', border: '1px solid #cbd5e1' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-            <span style={{ fontSize: '1.25rem' }}>🧪</span>
-            <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 800, color: '#0f172a' }}>
-              WHAT ARE WE TESTING IN THIS MONTE CARLO STRESS TEST?
-            </h3>
-          </div>
-
-          <p style={{ fontSize: '0.9375rem', lineHeight: 1.6, color: '#334155', margin: '0 0 16px 0' }}>
-            {sweepType === 'snr' &&
-              'We progressively degrade the signal-to-noise ratio from pristine laboratory conditions (40 dB) down to severe receiver noise (10 dB). This tests whether the analytical pseudoinverse amplifies measurement noise while checking the neural network regularization stability.'}
-            {sweepType === 'coupling' &&
-              'We introduce mismatch between the nominal mutual impedance model Z and hidden hardware coupling (from 0% up to 50%). This measures whether calibration is robust to unexpected electromagnetic cross-talk.'}
-            {sweepType === 'steering' &&
-              'We command the beam to scan across wide scan sectors from -50° to +50°. This verifies that calibration accuracy does not degrade near wide scan angles.'}
-          </p>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--color-text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              EXPERIMENT LEVEL ROADMAP ({currentSweepMeta.unit})
-            </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              {sweepType === 'snr' &&
-                [40, 30, 20, 15, 10].map((lvl, idx, arr) => (
-                  <React.Fragment key={lvl}>
-                    <div style={{ padding: '8px 16px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 6, fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '0.875rem', color: '#0f172a' }}>
-                      {lvl} dB
-                    </div>
-                    {idx < arr.length - 1 && <span style={{ color: '#94a3b8', fontWeight: 800 }}>→</span>}
-                  </React.Fragment>
-                ))}
-              {sweepType === 'coupling' &&
-                [0, 0.1, 0.2, 0.3, 0.4, 0.5].map((lvl, idx, arr) => (
-                  <React.Fragment key={lvl}>
-                    <div style={{ padding: '8px 16px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 6, fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '0.875rem', color: '#0f172a' }}>
-                      ±{(lvl * 100).toFixed(0)}%
-                    </div>
-                    {idx < arr.length - 1 && <span style={{ color: '#94a3b8', fontWeight: 800 }}>→</span>}
-                  </React.Fragment>
-                ))}
-              {sweepType === 'steering' &&
-                [-50, -30, 0, 30, 50].map((lvl, idx, arr) => (
-                  <React.Fragment key={lvl}>
-                    <div style={{ padding: '8px 16px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 6, fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '0.875rem', color: '#0f172a' }}>
-                      {lvl > 0 ? `+${lvl}°` : `${lvl}°`}
-                    </div>
-                    {idx < arr.length - 1 && <span style={{ color: '#94a3b8', fontWeight: 800 }}>→</span>}
-                  </React.Fragment>
-                ))}
+            {/* 5. Live Experiment Action Button */}
+            <div className="robustness-action-wrap">
+              <button
+                type="button"
+                id="btn-run-robustness"
+                className={`robustness-run-btn ${isComputing ? 'computing' : hasResult ? 'success' : ''}`}
+                onClick={handleRun}
+                disabled={isComputing}
+                aria-busy={isComputing}
+              >
+                <span className="action-icon">{isComputing ? '⏳' : hasResult ? '✓' : '▶'}</span>
+                <span className="action-text">
+                  {isComputing
+                    ? 'RUNNING MONTE CARLO...'
+                    : hasError
+                    ? 'MONTE CARLO FAILED — RETRY'
+                    : hasResult
+                    ? (superMode ? '★ SUPER MONTE CARLO COMPLETE · RE-RUN' : 'MONTE CARLO COMPLETE · RE-RUN')
+                    : 'START MONTE CARLO EXPERIMENT'}
+                </span>
+              </button>
             </div>
           </div>
 
-          <div style={{ marginTop: 18, display: 'flex', alignItems: 'center', gap: 12, fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>
-            <span style={{ padding: '2px 8px', background: '#e0f2fe', color: '#0369a1', borderRadius: 4, fontWeight: 700 }}>
-              LIVE COMPUTATION
-            </span>
-            <span>Click <strong>▶ START EXPERIMENT</strong> to trigger fresh backend Monte Carlo calculation.</span>
+          {/* 7. ACTIVE STRESS CONDITION CALLOUT */}
+          <div className="robustness-stress-callout">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span className="badge-tag orange-tag">{currentSweepMeta.category}</span>
+              <strong className="stress-title">Active Stress Condition:</strong>
+              <span className="stress-desc">{currentSweepMeta.name}</span>
+            </div>
+            <p className="stress-explanation">{currentSweepMeta.description}</p>
           </div>
+        </div>
+      </section>
+
+      {/* 17, 18, 19: STATUS BANNERS */}
+      {isComputing ? (
+        <div className="card robustness-card robustness-alert-banner computing" role="status">
+          <span className="alert-icon-spin">⚡</span>
+          <div>
+            <h3 className="alert-title">MONTE CARLO RUNNING</h3>
+            <p className="alert-desc">
+              Generating fresh simulated realizations and evaluating Analytical Baseline vs. PINN-Cal V4 across {currentSweepMeta.levels.length} stress levels...
+            </p>
+          </div>
+        </div>
+      ) : hasError ? (
+        <div className="card robustness-card robustness-alert-banner error" role="alert">
+          <span className="alert-icon">⚠️</span>
+          <div>
+            <h3 className="alert-title">ROBUSTNESS DATA UNAVAILABLE</h3>
+            <p className="alert-desc">{robustnessError || 'Evaluation encountered an unexpected backend error.'}</p>
+          </div>
+          <button type="button" className="btn-alert-retry" onClick={handleRun}>
+            Retry Experiment
+          </button>
+        </div>
+      ) : !hasResult ? (
+        <div className="card robustness-card robustness-alert-banner empty" role="status">
+          <span className="alert-icon">🧪</span>
+          <div>
+            <h3 className="alert-title">READY FOR STRESS TEST</h3>
+            <p className="alert-desc">
+              Configure the experiment parameters above and click <strong>START MONTE CARLO EXPERIMENT</strong> to evaluate fresh statistical realizations.
+            </p>
+          </div>
+          <ConceptTrigger conceptKey="snr" label="Noise Model Guide" />
+        </div>
+      ) : (
+        /* 20. RESULT FRESHNESS BANNER */
+        <div className="card robustness-card robustness-freshness-banner" role="status">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span className="fresh-dot">●</span>
+            <span className="fresh-badge">FRESH LIVE MONTE CARLO RESULT</span>
+            <span className="fresh-details">
+              Evaluated {numSamples} realizations per condition level (Seed: {seed})
+            </span>
+          </div>
+          <span className="fresh-tag">{currentSweepMeta.levels.length} Stress Levels Computed</span>
         </div>
       )}
 
-      {/* Results View */}
-      {result && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* Scientific Interpretation Callout */}
-          <div
-            style={{
-              padding: '12px 16px',
-              background: '#eff6ff',
-              border: '1px solid #bfdbfe',
-              borderRadius: 8,
-              fontSize: '0.75rem',
-              color: '#1e40af',
-              lineHeight: 1.5,
-            }}
-          >
-            <strong>Scientific Result Interpretation:</strong> This live experiment measures calibration error as operating conditions degrade.
-            Notice that at high SNR (e.g. 30–40 dB), the analytical baseline achieves low NMSE. Under severe noise (SNR = 10 dB), analytical matrix
-            inversion experiences noise amplification, while neural regularisation maintains stable bounded performance. Both methods are displayed
-            neutrally without declaring a universal winner.
+      {/* 8 & 15. EXPERIMENT ROADMAP / STRESS PROGRESSION */}
+      <section className="card robustness-card robustness-roadmap-card">
+        <div className="card-header robustness-card-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <h3 className="robustness-card-title">EXPERIMENT LEVEL ROADMAP</h3>
+            <span className="header-meta">Progression across stress domain ({currentSweepMeta.unit})</span>
           </div>
+          {sweepType === 'snr' && (
+            <div className="snr-story-badges">
+              <span className="story-badge green-badge">HIGH SNR (Pristine)</span>
+              <span className="story-arrow">→</span>
+              <span className="story-badge yellow-badge">MODERATE NOISE</span>
+              <span className="story-arrow">→</span>
+              <span className="story-badge red-badge">SEVERE NOISE (10 dB)</span>
+            </div>
+          )}
+        </div>
 
-          {/* Charts Row */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            <div className="card">
-              <div className="card-header">
-                <h4 style={{ margin: 0, fontSize: '0.875rem' }}>Calibration Accuracy (NMSE in dB)</h4>
-              </div>
-              <div className="card-body" style={{ padding: 10, height: 260 }}>
+        <div className="card-body" style={{ padding: 16 }}>
+          <div className="roadmap-levels-row">
+            {currentSweepMeta.levels.map((lvl, idx, arr) => {
+              // Find matching point in result if available
+              const pt = result?.points.find((p) => Math.abs(p.level - lvl) < 1e-4);
+
+              return (
+                <React.Fragment key={lvl}>
+                  <div className="roadmap-level-box">
+                    <div className="level-badge-header">
+                      <span className="level-number">LEVEL {idx + 1}</span>
+                      <span className="level-val">
+                        {sweepType === 'coupling'
+                          ? `±${(lvl * 100).toFixed(0)}%`
+                          : sweepType === 'steering'
+                          ? `${lvl > 0 ? `+${lvl}°` : `${lvl}°`}`
+                          : `${lvl} dB`}
+                      </span>
+                    </div>
+
+                    <div className="level-metrics-summary">
+                      <div className="level-metric-item">
+                        <span className="lm-label">Samples:</span>
+                        <span className="lm-val">{numSamples}</span>
+                      </div>
+                      <div className="level-metric-item">
+                        <span className="lm-label">Analytical NMSE:</span>
+                        <span className="lm-val cyan">{pt ? `${pt.analytical_nmse_db.toFixed(2)} dB` : '—'}</span>
+                      </div>
+                      <div className="level-metric-item">
+                        <span className="lm-label">PINN-Cal V4:</span>
+                        <span className="lm-val orange">
+                          {pt?.pinn_nmse_db != null ? `${pt.pinn_nmse_db.toFixed(2)} dB` : '—'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  {idx < arr.length - 1 && <div className="roadmap-arrow">→</div>}
+                </React.Fragment>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* 9 & 10. PRIMARY & SECONDARY ROBUSTNESS CHARTS (SIDE-BY-SIDE ON DESKTOP) */}
+      <section className="robustness-charts-section">
+        <div className="robustness-charts-grid">
+          {/* Primary Chart: NMSE vs Parameter */}
+          <div className="card robustness-card robustness-chart-card">
+            <div className="card-header robustness-card-header">
+              <h3 className="robustness-card-title">
+                CALIBRATION ACCURACY: NMSE vs {currentSweepMeta.name}
+              </h3>
+              <span className="header-meta">Normalized MSE (dB) · Lower is better</span>
+            </div>
+            <div className="card-body robustness-chart-body">
+              {!result ? (
+                <div className="awaiting-panel-large">
+                  <span>Run experiment to generate accuracy curves...</span>
+                </div>
+              ) : (
                 <Plot
                   data={[anaNmseTrace, pinnNmseTrace].filter(Boolean) as any}
                   layout={plotLayout('NMSE (dB)')}
@@ -327,14 +423,24 @@ export const RobustnessLab: React.FC = () => {
                   style={{ width: '100%', height: '100%' }}
                   config={{ displayModeBar: false, responsive: true }}
                 />
-              </div>
+              )}
             </div>
+          </div>
 
-            <div className="card">
-              <div className="card-header">
-                <h4 style={{ margin: 0, fontSize: '0.875rem' }}>Mean Phase Error (Degrees)</h4>
-              </div>
-              <div className="card-body" style={{ padding: 10, height: 260 }}>
+          {/* Secondary Chart: Mean Phase Error vs Parameter */}
+          <div className="card robustness-card robustness-chart-card">
+            <div className="card-header robustness-card-header">
+              <h3 className="robustness-card-title">
+                MEAN PHASE ERROR vs {currentSweepMeta.name}
+              </h3>
+              <span className="header-meta">Mean absolute transceiver phase error (degrees)</span>
+            </div>
+            <div className="card-body robustness-chart-body">
+              {!result ? (
+                <div className="awaiting-panel-large">
+                  <span>Run experiment to generate phase error curves...</span>
+                </div>
+              ) : (
                 <Plot
                   data={[phaseAnaTrace, phasePinnTrace].filter(Boolean) as any}
                   layout={plotLayout('Phase Error (°)')}
@@ -342,56 +448,125 @@ export const RobustnessLab: React.FC = () => {
                   style={{ width: '100%', height: '100%' }}
                   config={{ displayModeBar: false, responsive: true }}
                 />
-              </div>
+              )}
             </div>
           </div>
+        </div>
+      </section>
 
-          {/* Numerical Results Table */}
-          <div className="card">
-            <div className="card-header">
-              <h4 style={{ margin: 0, fontSize: '0.875rem' }}>Tabulated Fresh Monte Carlo Data</h4>
+      {/* 14. SCIENTIFIC INTERPRETATION PANEL */}
+      <section className="card robustness-card robustness-interpretation-card">
+        <div className="card-header robustness-card-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span className="header-icon blue-icon">💡</span>
+            <h3 className="robustness-card-title">WHAT DOES THIS STRESS TEST TELL US?</h3>
+          </div>
+          <span className="header-meta">Data-Driven Characterization Under Stress</span>
+        </div>
+        <div className="card-body" style={{ padding: 18 }}>
+          <div className="interpretation-content">
+            <p className="interp-p">
+              In this Monte Carlo stress test, operating hardware conditions are intentionally degraded to evaluate the numerical stability and regularisation limits of each calibration approach:
+            </p>
+            <ul className="interp-list">
+              <li>
+                <strong>Pristine / Low-Noise Conditions:</strong> When thermal receiver noise is minimal and coupling deviations are small, the linear analytical baseline provides an effective direct inverse of the nominal Z-impedance matrix.
+              </li>
+              <li>
+                <strong>Severe Noise & Mismatch Conditions:</strong> As noise increases (e.g. SNR drops toward 10 dB) or coupling deviations grow, unregularised analytical matrix inversion suffers from numerical noise amplification. The <strong>PINN-Cal V4</strong> architecture combines a Tikhonov preconditioner (δ = 0.15) with bounded neural residual outputs (α = 0.50), regularising the solution and maintaining stable bounded error.
+              </li>
+              <li>
+                <strong>Neutral Evaluation:</strong> Both methods are evaluated across identical fresh realizations without ranking badges or superiority claims, characterizing the real engineering operating boundaries.
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      {/* 11 & 12. METHOD COMPARISON & FRESH MONTE CARLO TABLE */}
+      <section className="card robustness-card robustness-table-card">
+        <div className="card-header robustness-card-header">
+          <div>
+            <h3 className="robustness-card-title">TABULATED MONTE CARLO EVALUATION DATA</h3>
+            <span className="header-meta">
+              Sample-averaged aggregate metrics for each evaluated stress level ({numSamples} samples/level)
+            </span>
+          </div>
+          <ConceptTrigger conceptKey="nmse" label="NMSE Definition" />
+        </div>
+
+        <div className="card-body" style={{ padding: 0 }}>
+          {!result ? (
+            <div className="awaiting-panel-large" style={{ height: 160 }}>
+              <span>Awaiting Monte Carlo evaluation execution...</span>
             </div>
-            <div className="card-body" style={{ padding: 0 }}>
-              <table className="comparison-table">
+          ) : (
+            <div className="table-responsive">
+              <table className="robustness-data-table">
                 <thead>
                   <tr>
                     <th>Level ({currentSweepMeta.unit})</th>
-                    <th style={{ color: 'var(--color-analytical)' }}>Analytical NMSE (dB)</th>
-                    <th style={{ color: 'var(--color-analytical)' }}>Analytical Phase (°)</th>
-                    <th style={{ color: 'var(--color-analytical)' }}>Analytical Gain (dB)</th>
-                    {result.pinn_available && (
-                      <>
-                        <th style={{ color: 'var(--color-pinn)' }}>PINN NMSE (dB)</th>
-                        <th style={{ color: 'var(--color-pinn)' }}>PINN Phase (°)</th>
-                        <th style={{ color: 'var(--color-pinn)' }}>PINN Gain (dB)</th>
-                      </>
-                    )}
+                    <th style={{ color: '#0891b2' }}>Analytical NMSE</th>
+                    <th style={{ color: '#0891b2' }}>Analytical Phase</th>
+                    <th style={{ color: '#0891b2' }}>Analytical Gain</th>
+                    <th style={{ color: '#0891b2' }}>Analytical Relative</th>
+                    <th style={{ color: '#ea580c' }}>PINN-Cal V4 NMSE</th>
+                    <th style={{ color: '#ea580c' }}>PINN Phase</th>
+                    <th style={{ color: '#ea580c' }}>PINN Gain</th>
+                    <th style={{ color: '#ea580c' }}>PINN Relative</th>
                   </tr>
                 </thead>
                 <tbody>
                   {result.points.map((p: RobustnessPoint) => (
                     <tr key={p.level}>
-                      <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{p.level}</td>
-                      <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-analytical)' }}>{p.analytical_nmse_db.toFixed(3)}</td>
-                      <td style={{ fontFamily: 'var(--font-mono)' }}>{p.analytical_phase_error_deg.toFixed(2)}°</td>
-                      <td style={{ fontFamily: 'var(--font-mono)' }}>{p.analytical_gain_error_db.toFixed(2)} dB</td>
-                      {result.pinn_available && (
-                        <>
-                          <td style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-pinn)', fontWeight: 600 }}>
-                            {p.pinn_nmse_db?.toFixed(3) ?? '—'}
-                          </td>
-                          <td style={{ fontFamily: 'var(--font-mono)' }}>{p.pinn_phase_error_deg?.toFixed(2) ?? '—'}°</td>
-                          <td style={{ fontFamily: 'var(--font-mono)' }}>{p.pinn_gain_error_db?.toFixed(2) ?? '—'} dB</td>
-                        </>
-                      )}
+                      <td className="level-cell">
+                        {sweepType === 'coupling'
+                          ? `±${(p.level * 100).toFixed(0)}%`
+                          : sweepType === 'steering'
+                          ? `${p.level > 0 ? `+${p.level.toFixed(1)}°` : `${p.level.toFixed(1)}°`}`
+                          : `${p.level.toFixed(1)} dB`}
+                      </td>
+                      <td className="ana-val">{p.analytical_nmse_db.toFixed(3)} dB</td>
+                      <td className="mono-val">{p.analytical_phase_error_deg.toFixed(2)}°</td>
+                      <td className="mono-val">{p.analytical_gain_error_db.toFixed(2)} dB</td>
+                      <td className="mono-val">{p.analytical_relative_error_pct.toFixed(2)}%</td>
+                      <td className="pinn-val">
+                        {p.pinn_nmse_db != null ? `${p.pinn_nmse_db.toFixed(3)} dB` : '—'}
+                      </td>
+                      <td className="mono-val">
+                        {p.pinn_phase_error_deg != null ? `${p.pinn_phase_error_deg.toFixed(2)}°` : '—'}
+                      </td>
+                      <td className="mono-val">
+                        {p.pinn_gain_error_db != null ? `${p.pinn_gain_error_db.toFixed(2)} dB` : '—'}
+                      </td>
+                      <td className="mono-val">
+                        {p.pinn_relative_error_pct != null ? `${p.pinn_relative_error_pct.toFixed(2)}%` : '—'}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          </div>
+          )}
         </div>
-      )}
+      </section>
+
+      {/* 6 & 28. FROZEN VALIDATED REFERENCE BENCHMARK NOTE */}
+      <footer className="frozen-reference-note-footer">
+        <div className="frozen-ref-card">
+          <div className="frozen-ref-header">
+            <span className="frozen-lock-icon">🔒</span>
+            <strong className="frozen-ref-title">
+              DISTINCTION: FROZEN VALIDATED REFERENCE BENCHMARK vs. FRESH MONTE CARLO
+            </strong>
+          </div>
+          <p className="frozen-ref-body">
+            The data displayed in the charts and table above represents a <strong>fresh live Monte Carlo evaluation</strong> generated during this session.
+            It is distinct from the <strong>frozen reference benchmark</strong> (Step 64 final blind holdout: 5,000 samples across 10 conditions, closed for model selection: NMSE = −14.81 dB, Phase Error = 4.47°, Gain Error = 1.00 dB).
+            Historical benchmark numbers are not mixed with or substituted for fresh experimental realizations.
+          </p>
+        </div>
+      </footer>
     </div>
   );
 };

@@ -39,9 +39,9 @@ export const HeroSection: React.FC = () => {
       }
     }
     if (isComplete || simulateState === 'success') {
-      return '★ CALIBRATION COMPLETE';
+      return superMode ? '★ SUPER — BEAM RESTORED' : '★ CALIBRATION COMPLETE';
     }
-    return 'CALIBRATION READY';
+    return superMode ? 'SUPER MODE · READY' : 'CALIBRATION READY';
   };
 
   return (
@@ -160,7 +160,7 @@ export const HeroSection: React.FC = () => {
             <div className="hero-quick-stat-box">
               <div className="stat-item">
                 <span className="stat-label">ARRAY APERTURE</span>
-                <span className="stat-val">64 Patches</span>
+                <span className="stat-val">64 Elements (ULA)</span>
               </div>
               <div className="stat-divider" />
               <div className="stat-item">
@@ -186,7 +186,7 @@ export const HeroSection: React.FC = () => {
             <span className="wavefront-dot impaired-dot" />
             <span>Impaired Sidelobe Scatter</span>
             <span className="wavefront-dot calibrated-dot" />
-            <span>Coherent Planar Wavefront ({targetAngle > 0 ? `+${targetAngle}°` : `${targetAngle}°`})</span>
+            <span>Coherent Calibrated Wavefront ({targetAngle > 0 ? `+${targetAngle}°` : `${targetAngle}°`})</span>
           </div>
 
           <svg

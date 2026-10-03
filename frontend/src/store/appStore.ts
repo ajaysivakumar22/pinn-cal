@@ -55,6 +55,8 @@ export type WorkflowStage =
   | 'verify'
   | 'completed';
 
+export type AppTheme = 'light' | 'dark';
+
 export type CalibrationExplorerMetric =
   | 'phase_error'
   | 'gain_error'
@@ -65,6 +67,11 @@ export type CalibrationExplorerMetric =
   | 'correction_magnitude';
 
 interface AppStore {
+  // Theme
+  theme: AppTheme;
+  setTheme: (theme: AppTheme) => void;
+  toggleTheme: () => void;
+
   // Navigation
   activeView: ActiveView;
   setActiveView: (view: ActiveView) => void;
@@ -125,9 +132,48 @@ interface AppStore {
 // Store implementation
 // ---------------------------------------------------------------------------
 
+const getInitialTheme = (): AppTheme => {
+  if (typeof window === 'undefined') return 'light';
+  try {
+    const saved = localStorage.getItem('pinn_cal_theme');
+    if (saved === 'dark' || saved === 'light') {
+      document.documentElement.setAttribute('data-theme', saved);
+      return saved;
+    }
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const initial: AppTheme = prefersDark ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', initial);
+    return initial;
+  } catch {
+    return 'light';
+  }
+};
+
 export const useAppStore = create<AppStore>((set, get) => ({
+  // Theme
+  theme: getInitialTheme(),
+  setTheme: (theme: AppTheme) => {
+    try {
+      localStorage.setItem('pinn_cal_theme', theme);
+      document.documentElement.setAttribute('data-theme', theme);
+    } catch {
+      // ignore
+    }
+    set({ theme });
+  },
+  toggleTheme: () => {
+    const next: AppTheme = get().theme === 'light' ? 'dark' : 'light';
+    try {
+      localStorage.setItem('pinn_cal_theme', next);
+      document.documentElement.setAttribute('data-theme', next);
+    } catch {
+      // ignore
+    }
+    set({ theme: next });
+  },
+
   // Navigation
-  activeView: 'simulation',
+  activeView: 'overview',
   setActiveView: (view) => set({ activeView: view }),
 
   // Super Mode & Franky

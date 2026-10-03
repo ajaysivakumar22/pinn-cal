@@ -44,11 +44,11 @@ const STEPS: StepItem[] = [
   },
   {
     num: '5',
-    title: 'PINN Neural Inference',
+    title: 'PINN-Cal V4 Compensation',
     icon: '🧠',
-    simpleDesc: 'Our physics-informed neural network inspects the observed currents and figures out the hidden errors across all 64 channels.',
-    techDesc: 'Trained feedforward network (130 inputs -> 256 -> 128 -> 64 -> 128 outputs, 83,904 parameters) predicting complex correction vector C.',
-    formula: 'C_pred = PINN([Re(I_obs), Im(I_obs), sin θ, cos θ])',
+    simpleDesc: 'Our physics-informed neural network inspects observed currents and computes compensation weights across all 64 channels.',
+    techDesc: 'Two-stage architecture: Tikhonov physics preconditioner (δ=0.15) combined with bounded neural residual denoiser (128 → 128 → 64 → 128, α=0.50, 33,088 parameters). Input: 128 real features [Re/Im(c_prior)], Output: 128 real features [Δc].',
+    formula: 'ĉ = c_prior + Δc,  where  Δc = α · tanh(r_θ(Re/Im(c_prior)))',
   },
   {
     num: '6',

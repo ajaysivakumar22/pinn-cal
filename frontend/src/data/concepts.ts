@@ -64,8 +64,8 @@ export const CONCEPTS: Record<string, ConceptDefinition> = {
     simpleExplanation:
       'Instead of learning blindly from data, a PINN is taught electromagnetic equations. If its predictions violate physical circuit laws (like Ohm’s law V = Z * I), it penalizes itself.',
     technicalExplanation:
-      'Feedforward architecture 130 -> 256 -> 128 -> 64 -> 128 (83,904 parameters). Input is 64 real and 64 imaginary observed currents plus sin(theta) and cos(theta). The loss enforces I_corr = Z_nom^-1 (C_pred * (Z_nom * I_obs)) matching ideal current.',
-    formula: '\\mathcal{L}_{phys} = \\| Z_{nom}^{-1} (C_{pred} \\odot (Z_{nom} I_{obs})) - I_{ideal} \\|_2^2',
+      'PINN-Cal V4 two-stage architecture: Tikhonov physics preconditioner (δ=0.15) combined with bounded MLP residual denoiser (128 → 128 → 64 → 128, α=0.50, 33,088 parameters). The residual network takes 128 real features representing Re/Im(c_prior) and outputs 128 real values representing Δc, yielding final compensation ĉ = c_prior + Δc.',
+    formula: '\\hat{c} = c_{prior} + \\Delta c, \\quad \\Delta c = \\alpha \\tanh(r_{\\theta}(\\text{Re/Im}(c_{prior}))), \\quad \\alpha = 0.50, \\; \\delta = 0.15',
     whyItMatters:
       'Physics constraints guide the network to physically plausible calibration solutions even in high-dimensional (64-element) mmWave regimes.',
   },

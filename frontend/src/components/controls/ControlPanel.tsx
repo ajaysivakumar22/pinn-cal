@@ -9,7 +9,7 @@ const FREQ_OPTIONS = [
 ];
 
 export const ControlPanel: React.FC = () => {
-  const { config, setConfig, resetConfig, runSimulation, simulateState, superMode } =
+  const { config, setConfig, resetConfig, runSimulation, simulateState, superMode, modelStatus } =
     useAppStore();
 
   const isComputing = simulateState === 'computing';
@@ -139,7 +139,7 @@ export const ControlPanel: React.FC = () => {
             <TactileSlider
               id="element-spacing"
               label="Element Spacing (d)"
-              hint="Inter-patch pitch (0.50λ = 5.35 mm at 28 GHz)."
+              hint="Inter-element spacing (0.50 λ = 5.35 mm at 28 GHz)."
               min={0.25}
               max={1.0}
               step={0.05}
@@ -243,7 +243,7 @@ export const ControlPanel: React.FC = () => {
       ) : (
         <div className="pinn-compat-alert success">
           <span style={{ fontWeight: 800 }}>✓</span>
-          <span>PINN Checkpoint Active: 64 Elements @ 28 GHz · 83,904 Parameters (Epoch 40 Validation-Selected)</span>
+          <span>PINN-Cal V4 Active: 64 Elements @ 28 GHz · {modelStatus?.trainable_parameters?.toLocaleString() ?? '33,088'} Parameters (δ=0.15, α=0.50)</span>
         </div>
       )}
 
